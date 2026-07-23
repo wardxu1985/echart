@@ -345,6 +345,8 @@ const CANAPE_COLORS = [
   '#B388FF',
 ];
 
+let chartResizeHandler = null;
+
 function initChart() {
   if (chart) {
     chart.dispose();
@@ -355,15 +357,16 @@ function initChart() {
   chart = echarts.init(container, undefined, {
     renderer: 'canvas',
   });
-  // Resize 监听
-  window.addEventListener('resize', () => {
-    chart && chart.resize();
-  });
+  // Resize 监听（移除旧的避免重复绑定）
+  if (chartResizeHandler) {
+    window.removeEventListener('resize', chartResizeHandler);
+  }
+  chartResizeHandler = () => chart && chart.resize();
+  window.addEventListener('resize', chartResizeHandler);
 }
 
 function renderChart(chartData) {
-  if (!chart) initChart();
-  chart.clear(); // 清空之前的图表，防止残留
+  initChart(); // 完全重建实例，避免 ECharts 内部状态残留
 
   const count = chartData.series.length;
   const xData = chartData.x.map(ts => new Date(ts));
@@ -424,11 +427,11 @@ function renderChart(chartData) {
         lineHeight: 14,
       },
       position: 'left',
-      splitNumber: 2,
+      splitNumber: 5,
       axisLine: { show: false },
       axisTick: { show: false },
       axisLabel: { fontSize: 8, color: '#9aa0a6' },
-      splitLine: isLast ? { lineStyle: { color: '#e5e7eb', type: 'solid' } } : { show: false },
+      splitLine: { show: true, lineStyle: { color: '#e5e7eb', type: 'solid' } },
     });
   });
 
