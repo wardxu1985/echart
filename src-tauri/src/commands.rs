@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use tauri::{AppHandle, State};
 use crate::state::{AppState, ChartData, ColumnInfo, ColumnType, FileOpenResult, SeriesData, TimeRange};
 use crate::excel_reader::read_excel;
+use crate::csv_reader::read_csv;
 use crate::downsample::{lttb_downsample, detect_gaps};
 
 const DOWNSAMPLE_TARGET: usize = 5000;
@@ -25,7 +26,11 @@ pub fn open_file(
         }
     }
 
-    let (data, columns, row_count) = read_excel(&path)?;
+    let (data, columns, row_count) = if path.to_lowercase().ends_with(".csv") {
+        read_csv(&path)?
+    } else {
+        read_excel(&path)?
+    };
 
     if data.is_empty() {
         return Err("文件中未找到有效数值列".to_string());
@@ -232,7 +237,7 @@ pub async fn pick_file(app: AppHandle) -> Result<Option<String>, String> {
     use tauri_plugin_dialog::DialogExt;
     let file = app.dialog()
         .file()
-        .add_filter("Excel", &["xlsx", "xls"])
+        .add_filter("信号文件", &["xlsx", "xls", "csv"])
         .blocking_pick_file();
     Ok(file.map(|f| f.to_string()))
 }

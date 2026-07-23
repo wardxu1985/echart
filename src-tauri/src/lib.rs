@@ -1,5 +1,6 @@
 mod state;
 mod excel_reader;
+mod csv_reader;
 mod downsample;
 mod commands;
 

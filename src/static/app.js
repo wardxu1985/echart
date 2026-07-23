@@ -541,7 +541,7 @@ async function onOpenFile() {
   } catch (e) {
     // Tauri IPC 不可用，用 fallback prompt（开发环境）
     console.warn('pick_file 失败，使用 prompt fallback:', e);
-    const path = prompt('输入 Excel 文件路径:');
+    const path = prompt('输入文件路径（xlsx/xls/csv）:');
     if (path) await loadFile(path);
   }
 }
@@ -619,7 +619,7 @@ async function loadFile(path) {
     showToast(`已加载: ${fileName} (${result.row_count} 行, ${result.columns.length} 列)`, 'success');
 
     // 更新状态栏
-    document.getElementById('statusRight').textContent =
+    document.getElementById('statusFileInfo').textContent =
       `${result.row_count} 行 × ${result.columns.length} 列`;
 
   } catch (err) {

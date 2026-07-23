@@ -34,6 +34,14 @@ html, body {
   background: #e0e4ea;
 }
 
+.menu-version {
+  margin-left: auto;
+  font-size: 11px;
+  color: #9aa0a6;
+  padding: 0 10px;
+  user-select: text;
+}
+
 /* ===== 主布局 ===== */
 #mainLayout {
   display: flex;
