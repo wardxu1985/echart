@@ -24,6 +24,21 @@ jobs:
         with:
           node-version: 24
 
+      - name: Set build version
+        shell: bash
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION="${{ github.ref_name }}"
+          else
+            VERSION="0.1.0-$(date +%Y%m%d)-${{ github.run_number }}"
+          fi
+          echo "BUILD_VERSION=$VERSION" >> $GITHUB_ENV
+          # 更新 tauri.conf.json
+          sed -i 's/"version": "0.1.0"/"version": "'"$VERSION"'"/' src-tauri/tauri.conf.json
+          # 更新 index.html 版本显示
+          sed -i 's/v0\.1\.0 · wardxu/v'"$VERSION"' · wardxu/' src/index.html
+          echo "Version set to: $VERSION"
+
       - name: Install npm dependencies
         run: npm install
         env:
