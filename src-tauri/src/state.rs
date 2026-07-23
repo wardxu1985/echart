@@ -47,7 +47,6 @@ pub struct ChartData {
 pub struct WindowState {
     pub raw_data: HashMap<String, Vec<f64>>,
     pub columns: Vec<ColumnInfo>,
-    pub row_count: usize,
 }
 
 pub struct AppState {

@@ -35,7 +35,6 @@ pub fn open_file(
     let window_state = crate::state::WindowState {
         raw_data: data,
         columns: columns.clone(),
-        row_count,
     };
 
     // 插入到全局状态
