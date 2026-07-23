@@ -1,0 +1,12 @@
+{
+  "name": "signal-viewer",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "npx tauri dev",
+    "build": "npx tauri build"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.0.0"
+  }
+}
