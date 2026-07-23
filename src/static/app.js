@@ -19,6 +19,7 @@ const state = {
   rawColumns: [],        // 备选时间列
   numericColumns: [],    // 数值信号列
   fileLoaded: false,
+  timeRange: null,       // { start: f64, end: f64 } | null
 };
 
 // ===== Toast 系统 =====
@@ -62,6 +63,7 @@ function getUrlParams() {
     wid: params.get('wid') || '',
     inheritColumns: params.get('inherit') || '',
     inheritFrom: params.get('from') || '',
+    filePath: params.get('file') || '',
   };
 }
 
@@ -187,6 +189,7 @@ function onXSelectChange() {
   const select = document.getElementById('xSelect');
   state.selectedXCol = select.value || null;
   updateGenerateButton();
+  updateStatusBar();
 }
 
 function renderSignalTags() {
@@ -219,6 +222,120 @@ function updateGenerateButton() {
   );
 }
 
+// ===== 信号运算 =====
+function populateComputeSelectors() {
+  const selA = document.getElementById('computeSignalA');
+  const selB = document.getElementById('computeSignalB');
+  const currentA = selA.value;
+  const currentB = selB.value;
+
+  selA.innerHTML = '<option value="">— 信号 A —</option>';
+  selB.innerHTML = '<option value="">— 信号 B —</option>';
+
+  state.numericColumns.forEach(col => {
+    const optA = document.createElement('option');
+    optA.value = col.name;
+    optA.textContent = col.name;
+    selA.appendChild(optA);
+
+    const optB = document.createElement('option');
+    optB.value = col.name;
+    optB.textContent = col.name;
+    selB.appendChild(optB);
+  });
+
+  // 恢复之前的选择
+  if (currentA && state.numericColumns.some(c => c.name === currentA)) selA.value = currentA;
+  if (currentB && state.numericColumns.some(c => c.name === currentB)) selB.value = currentB;
+
+  updateComputeAutoName();
+  updateComputeButton();
+}
+
+function updateComputeAutoName() {
+  const a = document.getElementById('computeSignalA').value;
+  const b = document.getElementById('computeSignalB').value;
+  const op = document.getElementById('computeOp').value;
+  const nameInput = document.getElementById('computeResultName');
+
+  if (a && b && a !== b) {
+    nameInput.placeholder = `${a}${op}${b}`;
+    if (!nameInput.value || nameInput.dataset.auto === 'true') {
+      nameInput.value = `${a}${op}${b}`;
+      nameInput.dataset.auto = 'true';
+    }
+  }
+}
+
+function updateComputeButton() {
+  const a = document.getElementById('computeSignalA').value;
+  const b = document.getElementById('computeSignalB').value;
+  const name = document.getElementById('computeResultName').value.trim();
+  const btn = document.getElementById('computeBtn');
+  btn.disabled = !(a && b && name);
+}
+
+function enableComputeSection() {
+  document.getElementById('computeSection').style.display = 'block';
+  document.getElementById('computeSignalA').disabled = false;
+  document.getElementById('computeSignalB').disabled = false;
+  document.getElementById('computeOp').disabled = false;
+  document.getElementById('computeResultName').disabled = false;
+  document.getElementById('computeBtn').disabled = true;
+  populateComputeSelectors();
+}
+
+async function onComputeSignal() {
+  const windowId = state.windowId;
+  const signalA = document.getElementById('computeSignalA').value;
+  const signalB = document.getElementById('computeSignalB').value;
+  const operation = document.getElementById('computeOp').value;
+  let resultName = document.getElementById('computeResultName').value.trim();
+
+  if (!signalA || !signalB || !resultName) {
+    showToast('请选择两个信号并输入结果名称', 'error');
+    return;
+  }
+
+  showToast(`正在运算: ${signalA} ${operation} ${signalB}`, 'info');
+
+  try {
+    const colInfo = await invoke('compute_signal', {
+      windowId,
+      signalA,
+      signalB,
+      operation,
+      resultName,
+    });
+
+    // 添加到前端状态并自动选中
+    state.numericColumns.push({
+      name: colInfo.name,
+      col_type: 'Numeric',
+      min: colInfo.min,
+      max: colInfo.max,
+      sample_count: colInfo.sample_count,
+    });
+    state.selectedYCols.add(colInfo.name);
+
+    // 刷新 UI
+    populateComputeSelectors();
+    renderSignalTags();
+    updateGenerateButton();
+    updateStatusBar();
+
+    // 清空输入
+    document.getElementById('computeResultName').value = '';
+    document.getElementById('computeResultName').dataset.auto = 'false';
+    updateComputeButton();
+
+    showToast(`已添加运算信号: ${resultName}`, 'success');
+  } catch (err) {
+    showToast(`运算失败: ${err}`, 'error');
+    console.error(err);
+  }
+}
+
 // ===== ECharts 管理 =====
 let chart = null;
 const CANAPE_COLORS = [
@@ -246,15 +363,16 @@ function initChart() {
 
 function renderChart(chartData) {
   if (!chart) initChart();
+  chart.clear(); // 清空之前的图表，防止残留
 
   const count = chartData.series.length;
   const xData = chartData.x.map(ts => new Date(ts));
 
   // 每个子图高度 150px，底部 dataZoom 30px
-  // 子图高度：最多显示 10 个在可见区域
+  // 子图高度：最多显示 10 个在可见区域，最高不超过 200px
   const SUBPLOT_VISIBLE = Math.min(count, 10);
   const availHeight = window.innerHeight - 170; // 减去菜单、状态栏、padding、zoom
-  const PANEL_HEIGHT = Math.max(75, Math.floor(availHeight / SUBPLOT_VISIBLE));
+  const PANEL_HEIGHT = Math.max(75, Math.min(200, Math.floor(availHeight / SUBPLOT_VISIBLE)));
   const GAP = 4;
   const ZOOM_HEIGHT = 30;
   const totalHeight = count * PANEL_HEIGHT + (count - 1) * GAP + ZOOM_HEIGHT;
@@ -270,11 +388,10 @@ function renderChart(chartData) {
   chartData.series.forEach((s, idx) => {
     const top = idx * (PANEL_HEIGHT + GAP);
     const isLast = idx === count - 1;
-    const onLeft = idx % 2 === 0;
 
     grids.push({
-      left: onLeft ? 50 : 16,
-      right: onLeft ? 16 : 50,
+      left: 56,
+      right: 16,
       top: top + 2,
       height: PANEL_HEIGHT - 16,
     });
@@ -290,16 +407,23 @@ function renderChart(chartData) {
       splitLine: { show: false },
     });
 
-    // Y 轴 — 左右交替放置以免干涉
+    // Y 轴 — 全部在左边，竖排文字，自动换行不超过子图高度
     yAxes.push({
       type: 'value',
       gridIndex: idx,
       name: s.name,
       nameLocation: 'middle',
-      nameGap: onLeft ? 28 : 12,
+      nameGap: 18,
       nameRotate: 90,
-      nameTextStyle: { fontSize: 10, color: '#5f6b7a', fontWeight: 'bold' },
-      position: onLeft ? 'left' : 'right',
+      nameTextStyle: {
+        fontSize: 10,
+        color: '#5f6b7a',
+        fontWeight: 'bold',
+        overflow: 'break',
+        width: Math.max(30, PANEL_HEIGHT - 16),
+        lineHeight: 14,
+      },
+      position: 'left',
       splitNumber: 2,
       axisLine: { show: false },
       axisTick: { show: false },
@@ -402,7 +526,12 @@ async function onOpenFile() {
 }
 
 async function loadFile(path) {
-  showToast('正在加载文件...', 'info');
+  const fileName = path.split(/[/\\]/).pop();
+
+  // 显示加载覆盖层
+  const overlay = document.getElementById('loadingOverlay');
+  document.getElementById('loadingText').textContent = `正在加载 ${fileName}…`;
+  overlay.style.display = 'flex';
 
   try {
     const urlParams = getUrlParams();
@@ -410,6 +539,7 @@ async function loadFile(path) {
     const result = await TauriBridge.openFile(path, inheritFrom);
 
     if (!result || !result.columns) {
+      overlay.style.display = 'none';
       showToast('文件加载失败：返回数据异常', 'error');
       return;
     }
@@ -419,12 +549,13 @@ async function loadFile(path) {
     state.rawColumns = result.columns.filter(c => c.col_type === 'Time');
     state.numericColumns = result.columns.filter(c => c.col_type === 'Numeric');
     state.fileLoaded = true;
+    state.timeRange = result.time_range || null;
 
     // 更新 UI
-    const fileName = path.split(/[/\\]/).pop();
     document.getElementById('fileLabel').textContent = `📁 ${fileName}`;
     document.getElementById('menuNewWindow').style.display = 'inline-block';
     document.getElementById('selectSignalBtn').disabled = false;
+    enableComputeSection();
 
     populateXSelect(result.columns);
     updateGenerateButton();
@@ -447,6 +578,23 @@ async function loadFile(path) {
       updateGenerateButton();
     }
 
+    // 清除新文件中不存在的信号
+    const removed = [];
+    state.selectedYCols.forEach(name => {
+      if (!state.numericColumns.some(c => c.name === name)) {
+        state.selectedYCols.delete(name);
+        removed.push(name);
+      }
+    });
+    if (removed.length > 0) {
+      renderSignalTags();
+      updateGenerateButton();
+      showToast(`信号 "${removed.join('、')}" 在新文件中不存在，已移除`, 'info');
+    }
+
+    // 隐藏覆盖层
+    overlay.style.display = 'none';
+
     showToast(`已加载: ${fileName} (${result.row_count} 行, ${result.columns.length} 列)`, 'success');
 
     // 更新状态栏
@@ -454,6 +602,7 @@ async function loadFile(path) {
       `${result.row_count} 行 × ${result.columns.length} 列`;
 
   } catch (err) {
+    overlay.style.display = 'none';
     showToast(`加载失败: ${err}`, 'error');
     console.error(err);
   }
@@ -499,9 +648,9 @@ async function onNewWindow() {
     const selected = await invoke('pick_file');
     if (!selected) return;
 
-    // 编码已选信号为 URL 参数
+    // 用当前 origin 构建完整 URL 以保留查询参数
     const inheritCols = Array.from(state.selectedYCols).join(',');
-    const newWindowUrl = `index.html?wid=${uuid()}&inherit=${encodeURIComponent(inheritCols)}&from=${state.windowId}`;
+    const newWindowUrl = `${window.location.origin}/index.html?file=${encodeURIComponent(selected)}&inherit=${encodeURIComponent(inheritCols)}&from=${state.windowId}`;
 
     await invoke('create_window', {
       url: newWindowUrl,
@@ -516,20 +665,24 @@ async function onNewWindow() {
   }
 }
 
-// ===== 状态栏 =====
-function updateStatusBar() {
-  if (state.fileLoaded) {
-    document.getElementById('statusLeft').textContent =
-      `已选 ${state.selectedYCols.size} 个信号 | X轴: ${state.selectedXCol || '未选择'}`;
-  }
+// ===== 时间格式化 =====
+function formatTimestamp(ts) {
+  if (ts == null || !isFinite(ts)) return '—';
+  const d = new Date(ts * 1000);
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-// ===== UUID =====
-function uuid() {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
-    const r = Math.random() * 16 | 0;
-    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
-  });
+// ===== 状态栏 =====
+function updateStatusBar() {
+  let left = '就绪';
+  if (state.fileLoaded) {
+    left = `已选 ${state.selectedYCols.size} 个信号 | X轴: ${state.selectedXCol || '未选择'}`;
+    if (state.timeRange && state.selectedXCol) {
+      left += ` | ${formatTimestamp(state.timeRange.start)} ~ ${formatTimestamp(state.timeRange.end)}`;
+    }
+  }
+  document.getElementById('statusLeft').textContent = left;
 }
 
 // ===== 空状态检查 =====
@@ -564,6 +717,22 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('dialogSelectAll').addEventListener('click', selectAllFiltered);
   document.getElementById('dialogClearAll').addEventListener('click', clearAllFiltered);
 
+  // 信号运算事件
+  document.getElementById('computeBtn').addEventListener('click', onComputeSignal);
+  document.getElementById('computeSignalA').addEventListener('change', () => {
+    updateComputeAutoName();
+    updateComputeButton();
+  });
+  document.getElementById('computeSignalB').addEventListener('change', () => {
+    updateComputeAutoName();
+    updateComputeButton();
+  });
+  document.getElementById('computeOp').addEventListener('change', updateComputeAutoName);
+  document.getElementById('computeResultName').addEventListener('input', () => {
+    document.getElementById('computeResultName').dataset.auto = 'false';
+    updateComputeButton();
+  });
+
   // 信号搜索框输入过滤
   document.getElementById('signalSearch').addEventListener('input', (e) => {
     onSignalSearch(e.target.value);
@@ -596,4 +765,10 @@ document.addEventListener('DOMContentLoaded', () => {
   initChart();
   document.getElementById('chartContainer').style.display = 'none';
   document.getElementById('chartPlaceholder').style.display = 'flex';
+
+  // 自动加载 URL 中指定的文件（新窗口打开时）
+  const urlParams = getUrlParams();
+  if (urlParams.filePath) {
+    loadFile(urlParams.filePath);
+  }
 });

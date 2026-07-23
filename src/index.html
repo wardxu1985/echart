@@ -35,6 +35,27 @@
         <div class="tag-count" id="signalCount">已选 0 个信号</div>
       </div>
 
+      <!-- 信号运算 -->
+      <div class="panel-section" id="computeSection" style="display:none;">
+        <label class="section-title">信号运算</label>
+        <div class="compute-row">
+          <select id="computeSignalA" class="compute-select" disabled>
+            <option value="">— 信号 A —</option>
+          </select>
+          <select id="computeOp" class="compute-op" disabled>
+            <option value="+">+</option>
+            <option value="-">−</option>
+          </select>
+          <select id="computeSignalB" class="compute-select" disabled>
+            <option value="">— 信号 B —</option>
+          </select>
+        </div>
+        <div class="compute-row">
+          <input type="text" id="computeResultName" class="compute-name" placeholder="结果名称" disabled>
+          <button id="computeBtn" class="compute-btn" disabled>✚ 添加</button>
+        </div>
+      </div>
+
       <button id="generateBtn" disabled>🎨 生成图表</button>
     </div>
 
@@ -69,6 +90,12 @@
         </div>
       </div>
     </div>
+  </div>
+
+  <!-- 加载覆盖层 -->
+  <div id="loadingOverlay" style="display:none;">
+    <div class="loading-spinner"></div>
+    <div class="loading-text" id="loadingText">正在加载文件…</div>
   </div>
 
   <!-- Toast 容器 -->

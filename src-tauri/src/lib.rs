@@ -15,6 +15,7 @@ pub fn run() {
             commands::close_window,
             commands::create_window,
             commands::pick_file,
+            commands::compute_signal,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

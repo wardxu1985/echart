@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use tauri::{AppHandle, State};
 use crate::state::{AppState, ChartData, ColumnInfo, ColumnType, FileOpenResult, SeriesData, TimeRange};
 use crate::excel_reader::read_excel;
@@ -104,6 +105,17 @@ pub fn get_series(
     };
     // 锁已释放，后续处理不阻塞其他窗口
 
+    // 确保时间升序排列（Excel 数据可能倒序，导致断点检测出错）
+    let mut order: Vec<usize> = (0..timestamps.len()).collect();
+    order.sort_by(|&a, &b| timestamps[a].partial_cmp(&timestamps[b]).unwrap_or(std::cmp::Ordering::Equal));
+    let timestamps: Vec<f64> = order.iter().map(|&i| timestamps[i]).collect();
+    let data_snapshot: HashMap<String, Vec<f64>> = data_snapshot.into_iter()
+        .map(|(k, v)| {
+            let sorted: Vec<f64> = order.iter().map(|&i| v[i]).collect();
+            (k, sorted)
+        })
+        .collect();
+
     // 过滤时间范围
     let range_indices: Vec<usize> = timestamps.iter().enumerate()
         .filter(|(_, &t)| {
@@ -196,7 +208,17 @@ pub fn create_window(
     use tauri::WebviewWindowBuilder;
 
     let window_id = uuid::Uuid::new_v4().to_string();
-    let builder = WebviewWindowBuilder::new(&app, &window_id, tauri::WebviewUrl::App(url.into()))
+
+    // 完整 URL 保留查询参数，否则用 App 方式加载
+    let webview_url = if url.starts_with("http://") || url.starts_with("https://") || url.starts_with("tauri://") {
+        tauri::WebviewUrl::External(
+            tauri::Url::parse(&url).map_err(|e| format!("URL解析失败: {}", e))?
+        )
+    } else {
+        tauri::WebviewUrl::App(std::path::PathBuf::from(&url))
+    };
+
+    let builder = WebviewWindowBuilder::new(&app, &window_id, webview_url)
         .title(&title)
         .inner_size(width as f64, height as f64)
         .resizable(true);
@@ -213,6 +235,71 @@ pub async fn pick_file(app: AppHandle) -> Result<Option<String>, String> {
         .add_filter("Excel", &["xlsx", "xls"])
         .blocking_pick_file();
     Ok(file.map(|f| f.to_string()))
+}
+
+#[tauri::command]
+pub fn compute_signal(
+    window_id: String,
+    signal_a: String,
+    signal_b: String,
+    operation: String,
+    result_name: String,
+    state: State<'_, AppState>,
+) -> Result<ColumnInfo, String> {
+    if result_name.len() > 100 {
+        return Err("结果名称过长".to_string());
+    }
+    if result_name.trim().is_empty() {
+        return Err("请输入结果名称".to_string());
+    }
+    if operation != "+" && operation != "-" {
+        return Err("不支持的运算，仅支持 + 和 -".to_string());
+    }
+
+    let mut windows = state.windows.lock().map_err(|e| e.to_string())?;
+    let window = windows.get_mut(&window_id)
+        .ok_or_else(|| format!("窗口 {} 不存在", window_id))?;
+
+    let data_a = window.raw_data.get(&signal_a)
+        .ok_or_else(|| format!("信号 \"{}\" 不存在", signal_a))?;
+    let data_b = window.raw_data.get(&signal_b)
+        .ok_or_else(|| format!("信号 \"{}\" 不存在", signal_b))?;
+
+    if data_a.len() != data_b.len() {
+        return Err("两个信号数据长度不一致".to_string());
+    }
+
+    if window.raw_data.contains_key(&result_name) {
+        return Err(format!("信号名 \"{}\" 已存在", result_name));
+    }
+
+    // 逐元素运算
+    let result: Vec<f64> = data_a.iter().zip(data_b.iter()).map(|(&a, &b)| match operation.as_str() {
+        "+" => a + b,
+        "-" => a - b,
+        _ => f64::NAN,
+    }).collect();
+
+    let valid: Vec<&f64> = result.iter().filter(|v| v.is_finite()).collect();
+    if valid.is_empty() {
+        return Err("运算结果全部无效".to_string());
+    }
+
+    let min = valid.iter().fold(f64::INFINITY, |a, &&b| a.min(b));
+    let max = valid.iter().fold(f64::NEG_INFINITY, |a, &&b| a.max(b));
+
+    let col_info = ColumnInfo {
+        name: result_name.clone(),
+        col_type: ColumnType::Numeric,
+        min,
+        max,
+        sample_count: valid.len(),
+    };
+
+    window.raw_data.insert(result_name, result);
+    window.columns.push(col_info.clone());
+
+    Ok(col_info)
 }
 
 /// 计算时间范围
@@ -234,7 +321,7 @@ fn calculate_time_range(columns: &[ColumnInfo]) -> TimeRange {
 /// Unix 时间戳转 ISO 字符串（使用 chrono）
 fn chrono_precise(secs: i64, nanos: u32) -> Option<String> {
     let dt = chrono::DateTime::from_timestamp(secs, nanos)?;
-    Some(dt.format("%Y-%m-%d %H:%M:%S%.3f").to_string())
+    Some(dt.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string())
 }
 
 #[cfg(test)]
@@ -262,6 +349,6 @@ mod tests {
         // 2024-01-01 00:00:00 UTC
         let result = chrono_precise(1704067200, 0);
         assert!(result.is_some());
-        assert_eq!(result.unwrap(), "2024-01-01 00:00:00.000");
+        assert_eq!(result.unwrap(), "2024-01-01T00:00:00.000Z");
     }
 }
