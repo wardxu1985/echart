@@ -243,6 +243,11 @@ pub async fn pick_file(app: AppHandle) -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
+pub fn get_version() -> String {
+    format!("v{} · wardxu", env!("CARGO_PKG_VERSION"))
+}
+
+#[tauri::command]
 pub fn compute_signal(
     window_id: String,
     signal_a: String,

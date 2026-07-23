@@ -724,6 +724,11 @@ window.addEventListener('beforeunload', () => {
 
 // ===== 初始化 =====
 document.addEventListener('DOMContentLoaded', () => {
+  // 从 Rust 获取版本号（编译时从 Cargo.toml 注入）
+  invoke('get_version').then(v => {
+    document.getElementById('menuVersion').textContent = v;
+  }).catch(() => {});
+
   // 绑定按钮事件（替代内联 onclick，避免 CSP 限制）
   document.getElementById('menuOpenFile').addEventListener('click', onOpenFile);
   document.getElementById('menuNewWindow').addEventListener('click', onNewWindow);
