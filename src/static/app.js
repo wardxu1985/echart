@@ -393,13 +393,16 @@ function renderChart(chartData) {
     const isLast = idx === count - 1;
 
     grids.push({
+      show: true,
       left: 56,
       right: 16,
       top: top + 2,
       height: PANEL_HEIGHT - 16,
+      borderWidth: 1,
+      borderColor: '#d0d5dd',
     });
 
-    // X 轴 — 每个子图独立，只有最后显示标签
+    // X 轴 — 仅最后子图显示标签
     xAxes.push({
       type: 'time',
       gridIndex: idx,
@@ -451,6 +454,14 @@ function renderChart(chartData) {
       itemStyle: { color: CANAPE_COLORS[idx % CANAPE_COLORS.length] },
       lineStyle: { width: 2 },
     },
+    // 零轴参考线（y=0），与背景网格线区分
+    markLine: {
+      silent: true,
+      symbol: 'none',
+      label: { show: false },
+      lineStyle: { color: '#a0a4ac', width: 1.5, type: 'solid' },
+      data: [{ yAxis: 0 }],
+    },
   }));
 
   // Tooltip：显示时间 + 所有信号值
@@ -486,6 +497,13 @@ function renderChart(chartData) {
     series,
     axisPointer: {
       link: [{ xAxisIndex: 'all' }],
+      label: {
+        backgroundColor: '#f0f1f3',
+        color: '#1a1a2e',
+        padding: [3, 8],
+        borderRadius: 4,
+        fontSize: 11,
+      },
     },
     dataZoom: [
       {
