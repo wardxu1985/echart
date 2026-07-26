@@ -30,6 +30,7 @@ pub struct FileOpenResult {
     pub time_range: TimeRange,
     pub row_count: usize,
     pub window_id: String,
+    pub vin: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

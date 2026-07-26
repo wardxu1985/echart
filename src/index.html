@@ -5,13 +5,22 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <title>信号查看器</title>
-  <link rel="stylesheet" href="static/style.css">
+  <link rel="stylesheet" href="static/style.css?v=31">
+  <style>
+    @keyframes loadingBarShimmer {
+      0%   { width:8%;  opacity:0.5; transform:translateX(-100%); }
+      50%  { width:60%; opacity:1;   transform:translateX(20%); }
+      100% { width:8%;  opacity:0.5; transform:translateX(100%); }
+    }
+  </style>
 </head>
 <body>
   <!-- 菜单栏 -->
   <div id="menuBar">
     <div class="menu-item" id="menuOpenFile">📂 打开文件</div>
     <div class="menu-item" id="menuNewWindow" style="display:none;">🪟 以新窗口打开</div>
+    <div class="menu-item" id="menuMarkerList" style="display:none;">📍 记号列表</div>
+    <div class="menu-item" id="menuClearMarkers" style="display:none;">🗑 清空记号</div>
     <span class="menu-version" id="menuVersion">v0.1.0 · wardxu</span>
   </div>
 
@@ -63,6 +72,7 @@
 
     <!-- 图表区 -->
     <div id="chartArea">
+      <div id="vinBanner" style="display:none;padding:6px 16px;margin-bottom:8px;background:#fef3e2;border-bottom:1px solid #f0c78e;font-size:13px;color:#8a6d3b;font-weight:600;"></div>
       <div id="chartPlaceholder">
         <p>📊 请打开 Excel 文件，选择信号后生成图表</p>
       </div>
@@ -98,6 +108,25 @@
   <div id="loadingOverlay" style="display:none;">
     <div class="loading-spinner"></div>
     <div class="loading-text" id="loadingText">正在加载文件…</div>
+    <div style="width:220px;height:6px;background:#d0d5dd;border-radius:3px;margin-top:16px;overflow:hidden;">
+      <div id="loadingBarFill" style="height:100%;background:#2b5fa8;border-radius:3px;width:30%;animation:loadingBarShimmer 1.4s ease-in-out infinite;"></div>
+    </div>
+  </div>
+
+  <!-- 记号列表弹窗 -->
+  <div id="markerDialogOverlay" class="dialog-overlay" style="display:none;">
+    <div class="dialog" style="width:700px;max-width:95vw;">
+      <div class="dialog-header">
+        <h3>记号列表</h3>
+        <span class="dialog-close" id="markerDialogCloseBtn">✕</span>
+      </div>
+      <div class="dialog-body" style="max-height:60vh;overflow:auto;">
+        <table style="width:100%;border-collapse:collapse;font-size:12px;">
+          <thead id="markerTableHead"></thead>
+          <tbody id="markerTableBody"></tbody>
+        </table>
+      </div>
+    </div>
   </div>
 
   <!-- Toast 容器 -->
@@ -112,6 +141,8 @@
   </div>
 
   <script src="static/echarts.min.js"></script>
-  <script src="static/app.js?v=16"></script>
+  <script src="static/dialog.js?v=31"></script>
+  <script src="static/chart.js?v=31"></script>
+  <script src="static/app.js?v=31"></script>
 </body>
 </html>

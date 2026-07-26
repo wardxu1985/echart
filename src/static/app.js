@@ -1,43 +1,17 @@
-// ===== 运行时检测 =====
+// ===== Tauri IPC 桥接 =====
 function hasTauriIPC() {
   return typeof window !== 'undefined' && window.__TAURI_INTERNALS__;
 }
-const invoke = (cmd, args) => {
+
+function invoke(cmd, args) {
   if (!hasTauriIPC()) {
     console.warn('[DEV] Tauri IPC 不可用，返回 mock');
     return Promise.reject('Tauri 运行时不可用');
   }
   return window.__TAURI_INTERNALS__.invoke(cmd, args);
-};
-
-// ===== UI 状态 =====
-const state = {
-  windowId: '',
-  columns: [],           // ColumnInfo[] from Rust
-  selectedXCol: null,    // string | null
-  selectedYCols: new Set(), // Set<string>
-  rawColumns: [],        // 备选时间列
-  numericColumns: [],    // 数值信号列
-  fileLoaded: false,
-  timeRange: null,       // { start: f64, end: f64 } | null
-};
-
-// ===== Toast 系统 =====
-function showToast(msg, type = 'info', duration = 3000) {
-  const container = document.getElementById('toastContainer');
-  const el = document.createElement('div');
-  el.className = `toast toast-${type}`;
-  el.textContent = msg;
-  container.appendChild(el);
-  setTimeout(() => {
-    el.style.opacity = '0';
-    el.style.transition = 'opacity 0.3s';
-    setTimeout(() => el.remove(), 300);
-  }, duration);
 }
 
-// ===== Tauri IPC 封装 =====
-const TauriBridge = {
+var TauriBridge = {
   async openFile(path, inheritFrom = null) {
     const args = { path };
     if (inheritFrom) args.inherit_from = inheritFrom;
@@ -56,6 +30,32 @@ const TauriBridge = {
   },
 };
 
+// ===== UI 状态 =====
+var state = {
+  windowId: '',
+  columns: [],
+  selectedXCol: null,
+  selectedYCols: new Set(),
+  rawColumns: [],
+  numericColumns: [],
+  fileLoaded: false,
+  timeRange: null,
+};
+
+// ===== Toast 系统 =====
+function showToast(msg, type = 'info', duration = 3000) {
+  const container = document.getElementById('toastContainer');
+  const el = document.createElement('div');
+  el.className = `toast toast-${type}`;
+  el.textContent = msg;
+  container.appendChild(el);
+  setTimeout(() => {
+    el.style.opacity = '0';
+    el.style.transition = 'opacity 0.3s';
+    setTimeout(() => el.remove(), 300);
+  }, duration);
+}
+
 // ===== URL 参数解析 =====
 function getUrlParams() {
   const params = new URLSearchParams(window.location.search);
@@ -65,87 +65,6 @@ function getUrlParams() {
     inheritFrom: params.get('from') || '',
     filePath: params.get('file') || '',
   };
-}
-
-// ===== 信号选择弹窗 =====
-function openSignalDialog() {
-  if (!state.fileLoaded) return;
-  const dialog = document.getElementById('signalDialogOverlay');
-  const list = document.getElementById('signalList');
-  const search = document.getElementById('signalSearch');
-
-  search.value = '';
-  dialog.style.display = 'flex';
-  renderSignalList(state.numericColumns);
-  updateDialogCount();
-  search.focus();
-}
-
-function closeSignalDialog() {
-  document.getElementById('signalDialogOverlay').style.display = 'none';
-}
-
-function renderSignalList(columns) {
-  const list = document.getElementById('signalList');
-  list.innerHTML = '';
-  columns.forEach((col, idx) => {
-    const checked = state.selectedYCols.has(col.name);
-    const item = document.createElement('div');
-    item.className = 'signal-item';
-    item.innerHTML = `
-      <input type="checkbox" id="sig_${idx}" value="${escapeHtml(col.name)}"
-        ${checked ? 'checked' : ''}>
-      <label for="sig_${idx}">${escapeHtml(col.name)}</label>
-      <span class="signal-range">${formatNum(col.min)} ~ ${formatNum(col.max)}</span>
-    `;
-    item.querySelector('input').addEventListener('change', (e) => {
-      if (e.target.checked) {
-        state.selectedYCols.add(col.name);
-      } else {
-        state.selectedYCols.delete(col.name);
-      }
-      updateDialogCount();
-    });
-    list.appendChild(item);
-  });
-}
-
-function onSignalSearch(keyword) {
-  const filtered = state.numericColumns.filter(col =>
-    col.name.toLowerCase().includes(keyword.toLowerCase())
-  );
-  renderSignalList(filtered);
-  updateDialogCount();
-}
-
-function selectAllFiltered() {
-  const checkboxes = document.querySelectorAll('#signalList input[type="checkbox"]');
-  checkboxes.forEach(cb => {
-    cb.checked = true;
-    state.selectedYCols.add(cb.value);
-  });
-  updateDialogCount();
-}
-
-function clearAllFiltered() {
-  const checkboxes = document.querySelectorAll('#signalList input[type="checkbox"]');
-  checkboxes.forEach(cb => {
-    cb.checked = false;
-    state.selectedYCols.delete(cb.value);
-  });
-  updateDialogCount();
-}
-
-function confirmSignalSelection() {
-  closeSignalDialog();
-  renderSignalTags();
-  updateGenerateButton();
-  updateStatusBar();
-}
-
-function updateDialogCount() {
-  document.getElementById('dialogCount').textContent =
-    `已选 ${state.selectedYCols.size} / ${state.numericColumns.length} 个信号`;
 }
 
 // ===== 工具函数 =====
@@ -162,12 +81,18 @@ function formatNum(v) {
   return v.toFixed(2);
 }
 
+function formatTimestamp(ts) {
+  if (ts == null || !isFinite(ts)) return '—';
+  const d = new Date(ts * 1000);
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
 // ===== 左面板交互 =====
 function populateXSelect(columns) {
   const select = document.getElementById('xSelect');
   select.innerHTML = '<option value="">— 选择时间列 —</option>';
   const timeCols = columns.filter(c => c.col_type === 'Time');
-  // 如果无时间列，显示所有数值列
   const candidates = timeCols.length > 0 ? timeCols : columns.filter(c => c.col_type === 'Numeric');
 
   candidates.forEach(col => {
@@ -178,7 +103,6 @@ function populateXSelect(columns) {
   });
   select.disabled = false;
 
-  // 自动选择第一个
   if (candidates.length > 0) {
     select.value = candidates[0].name;
     state.selectedXCol = candidates[0].name;
@@ -244,7 +168,6 @@ function populateComputeSelectors() {
     selB.appendChild(optB);
   });
 
-  // 恢复之前的选择
   if (currentA && state.numericColumns.some(c => c.name === currentA)) selA.value = currentA;
   if (currentB && state.numericColumns.some(c => c.name === currentB)) selB.value = currentB;
 
@@ -308,7 +231,6 @@ async function onComputeSignal() {
       resultName,
     });
 
-    // 添加到前端状态并自动选中
     state.numericColumns.push({
       name: colInfo.name,
       col_type: 'Numeric',
@@ -318,13 +240,11 @@ async function onComputeSignal() {
     });
     state.selectedYCols.add(colInfo.name);
 
-    // 刷新 UI
     populateComputeSelectors();
     renderSignalTags();
     updateGenerateButton();
     updateStatusBar();
 
-    // 清空输入
     document.getElementById('computeResultName').value = '';
     document.getElementById('computeResultName').dataset.auto = 'false';
     updateComputeButton();
@@ -336,201 +256,6 @@ async function onComputeSignal() {
   }
 }
 
-// ===== ECharts 管理 =====
-let chart = null;
-const CANAPE_COLORS = [
-  '#5470C6', '#91CC75', '#FAC858', '#EE6666', '#73C0DE',
-  '#3BA272', '#FC8452', '#9A60B4', '#EA7CCC', '#00E5FF',
-  '#FF6B6B', '#69F0AE', '#FFD740', '#40C4FF', '#FF80AB',
-  '#B388FF',
-];
-
-let chartResizeHandler = null;
-
-function initChart() {
-  if (chart) {
-    chart.dispose();
-    chart = null;
-  }
-  const container = document.getElementById('chartContainer');
-  container.style.display = 'block';
-  chart = echarts.init(container, undefined, {
-    renderer: 'canvas',
-  });
-  // Resize 监听（移除旧的避免重复绑定）
-  if (chartResizeHandler) {
-    window.removeEventListener('resize', chartResizeHandler);
-  }
-  chartResizeHandler = () => chart && chart.resize();
-  window.addEventListener('resize', chartResizeHandler);
-}
-
-function renderChart(chartData) {
-  initChart(); // 完全重建实例，避免 ECharts 内部状态残留
-
-  const count = chartData.series.length;
-  const xData = chartData.x.map(ts => new Date(ts));
-
-  // 每个子图高度 150px，底部 dataZoom 30px
-  // 子图高度：最多显示 10 个在可见区域，最高不超过 200px
-  const SUBPLOT_VISIBLE = Math.min(count, 10);
-  const availHeight = window.innerHeight - 170; // 减去菜单、状态栏、padding、zoom
-  const PANEL_HEIGHT = Math.max(75, Math.min(200, Math.floor(availHeight / SUBPLOT_VISIBLE)));
-  const GAP = 4;
-  const ZOOM_HEIGHT = 30;
-  const totalHeight = count * PANEL_HEIGHT + (count - 1) * GAP + ZOOM_HEIGHT;
-
-  // 容器高度设为全部子图总高，父级 chartArea 负责滚动
-  const container = document.getElementById('chartContainer');
-  container.style.height = totalHeight + 'px';
-
-  const grids = [];
-  const xAxes = [];
-  const yAxes = [];
-
-  chartData.series.forEach((s, idx) => {
-    const top = idx * (PANEL_HEIGHT + GAP);
-    const isLast = idx === count - 1;
-
-    grids.push({
-      show: true,
-      left: 56,
-      right: 16,
-      top: top + 2,
-      height: PANEL_HEIGHT - 16,
-      borderWidth: 1,
-      borderColor: '#d0d5dd',
-    });
-
-    // X 轴 — 仅最后子图显示标签
-    xAxes.push({
-      type: 'time',
-      gridIndex: idx,
-      show: isLast,
-      axisLine: isLast ? { lineStyle: { color: '#d0d5dd' } } : { show: false },
-      axisTick: { show: false },
-      axisLabel: isLast ? { color: '#5f6b7a', fontSize: 10 } : { show: false },
-      splitLine: { show: false },
-    });
-
-    // Y 轴 — 全部在左边，竖排文字，自动换行不超过子图高度
-    yAxes.push({
-      type: 'value',
-      gridIndex: idx,
-      name: s.name,
-      nameLocation: 'middle',
-      nameGap: 18,
-      nameRotate: 90,
-      nameTextStyle: {
-        fontSize: 10,
-        color: '#5f6b7a',
-        fontWeight: 'bold',
-        overflow: 'break',
-        width: Math.max(30, PANEL_HEIGHT - 16),
-        lineHeight: 14,
-      },
-      position: 'left',
-      splitNumber: 5,
-      axisLine: { show: false },
-      axisTick: { show: false },
-      axisLabel: { fontSize: 8, color: '#9aa0a6' },
-      splitLine: { show: true, lineStyle: { color: '#e5e7eb', type: 'solid' } },
-    });
-  });
-
-  // 构建 series — 每个 series 用自己 grid 的 xAxis
-  const series = chartData.series.map((s, idx) => ({
-    name: s.name,
-    type: 'line',
-    data: s.y.map((v, i) => [xData[i], v]),
-    symbol: 'circle',
-    symbolSize: 2.5,
-    lineStyle: { width: 1.5 },
-    xAxisIndex: idx,
-    yAxisIndex: idx,
-    connectNulls: false,
-    itemStyle: { color: CANAPE_COLORS[idx % CANAPE_COLORS.length] },
-    emphasis: {
-      itemStyle: { color: CANAPE_COLORS[idx % CANAPE_COLORS.length] },
-      lineStyle: { width: 2 },
-    },
-    // 零轴参考线（y=0），与背景网格线区分
-    markLine: {
-      silent: true,
-      symbol: 'none',
-      label: { show: false },
-      lineStyle: { color: '#a0a4ac', width: 1.5, type: 'solid' },
-      data: [{ yAxis: 0 }],
-    },
-  }));
-
-  // Tooltip：显示时间 + 所有信号值
-  chart.setOption({
-    tooltip: {
-      trigger: 'axis',
-      axisPointer: { type: 'cross' },
-      backgroundColor: '#ffffff',
-      borderColor: '#d0d5dd',
-      borderWidth: 1,
-      padding: [8, 12],
-      formatter: function(params) {
-        if (!params || params.length === 0) return '';
-        const time = params[0].axisValue;
-        const d = new Date(time);
-        const ts = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
-        let html = `<div style="font-size:11px;color:#5f6b7a;margin-bottom:3px;">${ts}</div>`;
-        params.forEach(p => {
-          if (p.value && p.value[1] != null) {
-            const v = typeof p.value[1] === 'number' ? p.value[1].toFixed(2) : p.value[1];
-            html += `<div style="font-size:12px;line-height:1.5;display:flex;justify-content:space-between;gap:12px;">
-              <span style="color:#1a1a2e;">${p.marker} ${p.seriesName}</span>
-              <span style="font-family:Consolas,monospace;color:#2b5fa8;font-weight:bold;">${v}</span>
-            </div>`;
-          }
-        });
-        return html;
-      },
-    },
-    grid: grids,
-    xAxis: xAxes,
-    yAxis: yAxes,
-    series,
-    axisPointer: {
-      link: [{ xAxisIndex: 'all' }],
-      label: {
-        backgroundColor: '#f0f1f3',
-        color: '#1a1a2e',
-        padding: [3, 8],
-        borderRadius: 4,
-        fontSize: 11,
-      },
-    },
-    dataZoom: [
-      {
-        type: 'inside',
-        xAxisIndex: chartData.series.map((_, i) => i),
-        start: 0,
-        end: 100,
-      },
-      {
-        type: 'slider',
-        xAxisIndex: chartData.series.map((_, i) => i),
-        start: 0,
-        end: 100,
-        bottom: 0,
-        height: 20,
-        borderColor: '#d0d5dd',
-        backgroundColor: '#f5f6f8',
-        fillerColor: 'rgba(43, 95, 168, 0.15)',
-        handleStyle: { color: '#2b5fa8' },
-        textStyle: { color: '#5f6b7a', fontSize: 10 },
-      },
-    ],
-  });
-
-  chart.resize();
-}
-
 // ===== 文件打开 =====
 async function onOpenFile() {
   try {
@@ -539,7 +264,6 @@ async function onOpenFile() {
 
     await loadFile(selected);
   } catch (e) {
-    // Tauri IPC 不可用，用 fallback prompt（开发环境）
     console.warn('pick_file 失败，使用 prompt fallback:', e);
     const path = prompt('输入文件路径（xlsx/xls/csv）:');
     if (path) await loadFile(path);
@@ -549,7 +273,6 @@ async function onOpenFile() {
 async function loadFile(path) {
   const fileName = path.split(/[/\\]/).pop();
 
-  // 显示加载覆盖层
   const overlay = document.getElementById('loadingOverlay');
   document.getElementById('loadingText').textContent = `正在加载 ${fileName}…`;
   overlay.style.display = 'flex';
@@ -572,7 +295,15 @@ async function loadFile(path) {
     state.fileLoaded = true;
     state.timeRange = result.time_range || null;
 
-    // 更新 UI
+    // 显示 VIN/车架号
+    var vinBanner = document.getElementById('vinBanner');
+    if (result.vin) {
+      vinBanner.textContent = '🚗 ' + result.vin;
+      vinBanner.style.display = 'block';
+    } else {
+      vinBanner.style.display = 'none';
+    }
+
     document.getElementById('fileLabel').textContent = `📁 ${fileName}`;
     document.getElementById('menuNewWindow').style.display = 'inline-block';
     document.getElementById('selectSignalBtn').disabled = false;
@@ -582,7 +313,6 @@ async function loadFile(path) {
     updateGenerateButton();
     updateStatusBar();
 
-    // 信号选择弹窗恢复已选
     document.getElementById('signalSearch').value = '';
 
     // 处理继承信号
@@ -613,12 +343,10 @@ async function loadFile(path) {
       showToast(`信号 "${removed.join('、')}" 在新文件中不存在，已移除`, 'info');
     }
 
-    // 隐藏覆盖层
     overlay.style.display = 'none';
 
     showToast(`已加载: ${fileName} (${result.row_count} 行, ${result.columns.length} 列)`, 'success');
 
-    // 更新状态栏
     document.getElementById('statusFileInfo').textContent =
       `${result.row_count} 行 × ${result.columns.length} 列`;
 
@@ -644,16 +372,23 @@ async function generateChart() {
   showToast('正在生成图表...', 'info');
 
   try {
-    const data = await TauriBridge.getSeries(
+    var data = await TauriBridge.getSeries(
       state.windowId,
       Array.from(state.selectedYCols),
       null,
       null
     );
 
+    // 保存当前数据供记号标记用
+    window.__chartData = data;
+    chartMarkers = [];
+    updateClearMarkersBtn();
+
     document.getElementById('chartPlaceholder').style.display = 'none';
     document.getElementById('chartContainer').style.display = 'block';
-    renderChart(data);
+    document.getElementById('menuMarkerList').style.display = 'inline-block';
+    document.getElementById('menuClearMarkers').style.display = 'none';
+    renderChart(data, chartMarkers);
     showToast('图表已生成', 'success');
     updateStatusBar();
   } catch (err) {
@@ -663,15 +398,100 @@ async function generateChart() {
   }
 }
 
+// ===== 记号标记 =====
+var chartMarkers = [];
+
+// 点击图表数据点时添加记号
+function onChartClicked(isoTime) {
+  if (!window.__chartData) return;
+
+  var marker = {
+    time: isoTime,
+    values: {}
+  };
+
+  // 为每个信号查找该时刻最近的值
+  var xData = window.__chartData.x;
+  var closestIdx = 0;
+  var closestDist = Infinity;
+  for (var i = 0; i < xData.length; i++) {
+    var dist = Math.abs(new Date(xData[i]).getTime() - new Date(isoTime).getTime());
+    if (dist < closestDist) { closestDist = dist; closestIdx = i; }
+  }
+
+  window.__chartData.series.forEach(function (s) {
+    marker.values[s.name] = s.y[closestIdx];
+  });
+
+  chartMarkers.push(marker);
+  updateClearMarkersBtn();
+  applyMarkers(window.__chartData, chartMarkers);
+  showToast('已添加记号 M' + chartMarkers.length, 'success');
+}
+
+function clearMarkers() {
+  chartMarkers = [];
+  updateClearMarkersBtn();
+  if (window.__chartData) {
+    applyMarkers(window.__chartData, chartMarkers);
+  }
+  showToast('记号已清空', 'info');
+}
+
+function updateClearMarkersBtn() {
+  var btn = document.getElementById('menuClearMarkers');
+  if (btn) btn.style.display = chartMarkers.length > 0 ? 'inline-block' : 'none';
+}
+
+function showMarkerList() {
+  if (chartMarkers.length === 0) {
+    showToast('暂无记号', 'info');
+    return;
+  }
+
+  var dialog = document.getElementById('markerDialogOverlay');
+  var thead = document.getElementById('markerTableHead');
+  var tbody = document.getElementById('markerTableBody');
+
+  // 表头：时间 | 信号1 | 信号2 | ...
+  var signalNames = Object.keys(chartMarkers[0].values);
+  thead.innerHTML = '<tr><th>记号</th><th>时间</th>' +
+    signalNames.map(function (n) { return '<th>' + escapeHtml(n) + '</th>'; }).join('') +
+    '</tr>';
+
+  // 表体
+  tbody.innerHTML = chartMarkers.map(function (m, i) {
+    var d = new Date(m.time);
+    var timeStr = d.getFullYear() + '-' +
+      String(d.getMonth() + 1).padStart(2, '0') + '-' +
+      String(d.getDate()).padStart(2, '0') + ' ' +
+      String(d.getHours()).padStart(2, '0') + ':' +
+      String(d.getMinutes()).padStart(2, '0') + ':' +
+      String(d.getSeconds()).padStart(2, '0');
+
+    return '<tr><td>M' + (i + 1) + '</td><td>' + timeStr + '</td>' +
+      signalNames.map(function (n) {
+        var v = m.values[n];
+        return '<td style="font-family:Consolas,monospace;text-align:right;">' + (v != null ? formatNum(v) : '—') + '</td>';
+      }).join('') +
+      '</tr>';
+  }).join('');
+
+  dialog.style.display = 'flex';
+}
+
+function closeMarkerList() {
+  document.getElementById('markerDialogOverlay').style.display = 'none';
+}
+
 // ===== 多窗口 =====
 async function onNewWindow() {
   try {
     const selected = await invoke('pick_file');
     if (!selected) return;
 
-    // 用当前 origin 构建完整 URL 以保留查询参数
     const inheritCols = Array.from(state.selectedYCols).join(',');
-    const newWindowUrl = `${window.location.origin}/index.html?file=${encodeURIComponent(selected)}&inherit=${encodeURIComponent(inheritCols)}&from=${state.windowId}`;
+    const newWindowUrl = `index.html?file=${encodeURIComponent(selected)}&inherit=${encodeURIComponent(inheritCols)}&from=${state.windowId}`;
 
     await invoke('create_window', {
       url: newWindowUrl,
@@ -684,14 +504,6 @@ async function onNewWindow() {
   } catch (err) {
     showToast(`打开新窗口失败: ${err}`, 'error');
   }
-}
-
-// ===== 时间格式化 =====
-function formatTimestamp(ts) {
-  if (ts == null || !isFinite(ts)) return '—';
-  const d = new Date(ts * 1000);
-  const pad = n => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
 // ===== 状态栏 =====
@@ -724,19 +536,25 @@ window.addEventListener('beforeunload', () => {
 
 // ===== 初始化 =====
 document.addEventListener('DOMContentLoaded', () => {
-  // 从 Rust 获取版本号（编译时从 Cargo.toml 注入）
+  // 从 Rust 获取版本号
   invoke('get_version').then(v => {
     document.getElementById('menuVersion').textContent = v;
   }).catch(() => {});
 
-  // 绑定按钮事件（替代内联 onclick，避免 CSP 限制）
+  // 绑定按钮事件
   document.getElementById('menuOpenFile').addEventListener('click', onOpenFile);
   document.getElementById('menuNewWindow').addEventListener('click', onNewWindow);
+  document.getElementById('menuClearMarkers').addEventListener('click', clearMarkers);
+  document.getElementById('menuMarkerList').addEventListener('click', showMarkerList);
+  document.getElementById('markerDialogCloseBtn').addEventListener('click', closeMarkerList);
+  document.getElementById('markerDialogOverlay').addEventListener('click', function (e) {
+    if (e.target === e.currentTarget) closeMarkerList();
+  });
   document.getElementById('selectSignalBtn').addEventListener('click', openSignalDialog);
   document.getElementById('generateBtn').addEventListener('click', generateChart);
   document.getElementById('xSelect').addEventListener('change', onXSelectChange);
 
-  // 对话框按钮事件（替代内联 onclick）
+  // 对话框按钮事件
   document.getElementById('dialogCloseBtn').addEventListener('click', closeSignalDialog);
   document.getElementById('dialogCancelBtn').addEventListener('click', closeSignalDialog);
   document.getElementById('dialogConfirmBtn').addEventListener('click', confirmSignalSelection);
@@ -764,7 +582,7 @@ document.addEventListener('DOMContentLoaded', () => {
     onSignalSearch(e.target.value);
   });
 
-  // 监听 Enter 键在搜索框中
+  // Enter/Escape 在搜索框中
   document.getElementById('signalSearch').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') confirmSignalSelection();
     if (e.key === 'Escape') closeSignalDialog();

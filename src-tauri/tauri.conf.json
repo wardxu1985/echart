@@ -5,7 +5,6 @@
   "identifier": "com.signal-viewer.app",
   "build": {
     "frontendDist": "../src",
-    "devUrl": "http://localhost:1420",
     "beforeDevCommand": "",
     "beforeBuildCommand": ""
   },

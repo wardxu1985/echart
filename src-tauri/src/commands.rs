@@ -1,18 +1,18 @@
 use std::collections::HashMap;
-use tauri::{AppHandle, State};
+use serde::Serialize;
+use tauri::{AppHandle, Emitter, State};
 use crate::state::{AppState, ChartData, ColumnInfo, ColumnType, FileOpenResult, SeriesData, TimeRange};
 use crate::excel_reader::read_excel;
 use crate::csv_reader::read_csv;
-use crate::downsample::{lttb_downsample, detect_gaps};
+use crate::downsample::detect_gaps;
 
-const DOWNSAMPLE_TARGET: usize = 5000;
 const MAX_SERIES: usize = 20;
 
 #[tauri::command]
-pub fn open_file(
+pub async fn open_file(
     path: String,
     _inherit_from: Option<String>,
-    _app: AppHandle,
+    app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<FileOpenResult, String> {
     if path.len() > 500 {
@@ -26,11 +26,23 @@ pub fn open_file(
         }
     }
 
-    let (data, columns, row_count) = if path.to_lowercase().ends_with(".csv") {
-        read_csv(&path)?
-    } else {
-        read_excel(&path)?
-    };
+    let app_for_blocking = app.clone();
+    let path_for_blocking = path.clone();
+
+    // 将重型文件 IO 放到独立阻塞线程，避免卡死主线程和前端
+    let (data, columns, row_count, vin) = tauri::async_runtime::spawn_blocking(move || {
+        let _ = app_for_blocking.emit("loading-progress", ProgressPayload { percent: 10, message: "正在读取文件…" });
+
+        let result = if path_for_blocking.to_lowercase().ends_with(".csv") {
+            read_csv(&path_for_blocking)
+        } else {
+            read_excel(&path_for_blocking)
+        };
+
+        let _ = app_for_blocking.emit("loading-progress", ProgressPayload { percent: 85, message: "加载完成" });
+
+        result
+    }).await.map_err(|e| format!("文件读取线程异常: {}", e))??;
 
     if data.is_empty() {
         return Err("文件中未找到有效数值列".to_string());
@@ -55,6 +67,7 @@ pub fn open_file(
         time_range,
         row_count,
         window_id,
+        vin,
     })
 }
 
@@ -74,7 +87,8 @@ pub fn get_series(
         return Err(format!("最多选择 {} 个信号，当前选择了 {}", MAX_SERIES, columns.len()));
     }
 
-    // 快速获取数据后释放锁，避免阻塞其他窗口
+    // 快速提取所需列后释放锁，避免阻塞其他窗口
+    // 不再克隆整个 raw_data，仅提取时间列 + 请求的信号列
     let (timestamps, data_snapshot) = {
         let windows = state.windows.lock().map_err(|e| e.to_string())?;
         let window = windows.get(&window_id)
@@ -106,7 +120,20 @@ pub fn get_series(
             .ok_or_else(|| "时间列数据缺失".to_string())?
             .clone();
 
-        (ts, window.raw_data.clone())
+        // 仅提取需要的列（时间列 + 请求的信号列）
+        let mut snapshot: HashMap<String, Vec<f64>> = HashMap::with_capacity(columns.len() + 1);
+        // 插入时间列
+        snapshot.insert(time_col.to_string(), ts.clone());
+        // 插入请求的信号列（跳过时间列本身，避免重复插入）
+        for col_name in &columns {
+            if col_name != time_col {
+                if let Some(values) = window.raw_data.get(col_name) {
+                    snapshot.insert(col_name.clone(), values.clone());
+                }
+            }
+        }
+
+        (ts, snapshot)
     };
     // 锁已释放，后续处理不阻塞其他窗口
 
@@ -141,40 +168,31 @@ pub fn get_series(
     // 检测断点
     let gaps = detect_gaps(&filtered_x, 3.0);
 
-    // 降采样时间轴
-    let (_, sampled_x, _) = lttb_downsample(&filtered_x, &filtered_x, DOWNSAMPLE_TARGET);
-
-    // 对每个选中的列降采样
+    // 全量返回，不做降采样
     let mut series_list = Vec::new();
 
     for col_name in &columns {
         if let Some(values) = data_snapshot.get(col_name) {
-            let filtered_y: Vec<f64> = range_indices.iter()
-                .map(|&i| values.get(i).copied().unwrap_or(f64::NAN))
-                .collect();
-
-            // 添加断点位置的 NaN
-            let y_with_gaps: Vec<f64> = filtered_y.iter().enumerate()
-                .map(|(i, &v)| if gaps[i] { f64::NAN } else { v })
-                .collect();
-
-            // LTTB 降采样
-            let (_, _, sampled_y) = lttb_downsample(&filtered_x, &y_with_gaps, DOWNSAMPLE_TARGET);
-
-            // 转为 Option<f64>（NaN → None）
-            let y_optional: Vec<Option<f64>> = sampled_y.iter()
-                .map(|&v| if v.is_nan() { None } else { Some(v) })
+            let y_values: Vec<Option<f64>> = range_indices.iter().enumerate()
+                .map(|(i, &idx)| {
+                    if gaps[i] {
+                        None // 断点位置插入 null
+                    } else {
+                        let v = values.get(idx).copied().unwrap_or(f64::NAN);
+                        if v.is_finite() { Some(v) } else { None }
+                    }
+                })
                 .collect();
 
             series_list.push(SeriesData {
                 name: col_name.clone(),
-                y: y_optional,
+                y: y_values,
             });
         }
     }
 
     // 时间戳转为 ISO 字符串
-    let x_strings: Vec<String> = sampled_x.iter()
+    let x_strings: Vec<String> = filtered_x.iter()
         .map(|&ts| {
             let secs = ts as i64;
             let nanos = ((ts - secs as f64) * 1_000_000_000.0) as u32;
@@ -214,13 +232,27 @@ pub fn create_window(
 
     let window_id = uuid::Uuid::new_v4().to_string();
 
-    // 完整 URL 保留查询参数，否则用 App 方式加载
-    let webview_url = if url.starts_with("http://") || url.starts_with("https://") || url.starts_with("tauri://") {
+    // 将 URL 转为 WebviewUrl：http/https 用 External，其余用 App（相对路径或 tauri://）
+    let webview_url = if url.starts_with("http://") || url.starts_with("https://") {
         tauri::WebviewUrl::External(
             tauri::Url::parse(&url).map_err(|e| format!("URL解析失败: {}", e))?
         )
     } else {
-        tauri::WebviewUrl::App(std::path::PathBuf::from(&url))
+        // 对于 tauri:// 或相对路径，提取路径+查询参数，统一用 App 模式
+        let app_path = if url.starts_with("tauri://") {
+            tauri::Url::parse(&url)
+                .map(|p| {
+                    let path = p.path().trim_start_matches('/').to_string();
+                    match p.query() {
+                        Some(q) => format!("{}?{}", path, q),
+                        None => path,
+                    }
+                })
+                .unwrap_or(url)
+        } else {
+            url
+        };
+        tauri::WebviewUrl::App(std::path::PathBuf::from(app_path))
     };
 
     let builder = WebviewWindowBuilder::new(&app, &window_id, webview_url)
@@ -310,6 +342,13 @@ pub fn compute_signal(
     window.columns.push(col_info.clone());
 
     Ok(col_info)
+}
+
+/// 加载进度事件载荷
+#[derive(Clone, Serialize)]
+struct ProgressPayload {
+    percent: u32,
+    message: &'static str,
 }
 
 /// 计算时间范围

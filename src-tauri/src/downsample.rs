@@ -1,5 +1,6 @@
 /// Largest Triangle Three Buckets 降采样
 /// 保留时序视觉特征，适用于高采样率 CAN 信号
+#[allow(dead_code)]
 pub fn lttb_downsample(
     x: &[f64],
     y: &[f64],

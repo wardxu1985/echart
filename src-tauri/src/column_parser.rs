@@ -1,0 +1,251 @@
+use std::collections::HashMap;
+use crate::state::{ColumnInfo, ColumnType};
+
+/// 常见时间关键词
+const TIME_KEYWORDS: &[&str] = &["time", "event", "日期", "时间"];
+
+pub fn has_time_keyword(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    TIME_KEYWORDS.iter().any(|kw| lower.contains(kw))
+}
+
+/// 解析可能带后缀单位的数值（"100V" → 100.0, "10.5kW" → 10.5）
+pub fn parse_numeric_with_unit(s: &str) -> Option<f64> {
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    // 先尝试直接解析
+    if let Ok(n) = trimmed.parse::<f64>() {
+        return Some(n);
+    }
+    // 提取前导数字部分（含小数点）
+    let num_part: String = trimmed.chars().take_while(|c| c.is_ascii_digit() || *c == '.' || *c == '-').collect();
+    if num_part.is_empty() || num_part == "." || num_part == "-" {
+        return None;
+    }
+    num_part.parse::<f64>().ok()
+}
+
+/// 尝试解析时间字符串为 Unix 时间戳
+pub fn parse_timestamp_string(s: &str) -> Option<f64> {
+    let trimmed = s.trim();
+
+    // 先尝试数值解析（可能是 Excel 序列号或 Unix 时间戳）
+    if let Some(num) = parse_numeric_with_unit(trimmed) {
+        if num > 1e9 && num < 2e9 {
+            return Some(num); // 已经是 Unix 时间戳
+        }
+        if num > 40000.0 && num < 200000.0 {
+            // Excel 序列号 → UTC 时间戳（序列号基于本地时间，需减时区偏移）
+            let utc_ts = (num - 25569.0) * 86400.0;
+            let local_offset_secs = chrono::Local::now().offset().local_minus_utc() as f64;
+            return Some(utc_ts - local_offset_secs);
+        }
+        return Some(num);
+    }
+
+    // 尝试日期时间字符串解析
+    // 注意：Excel/CSV 中的日期时间字符串通常是本地时间（如北京时间），
+    // 需要用本地时区偏移量转为 UTC 时间戳，否则前端显示会差 8 小时
+    let naive_to_timestamp = |dt: chrono::NaiveDateTime| -> f64 {
+        let local_offset = *chrono::Local::now().offset();
+        if let Some(local_dt) = dt.and_local_timezone(local_offset).single() {
+            return local_dt.timestamp() as f64;
+        }
+        // fallback: 当作 UTC 处理
+        dt.and_utc().timestamp() as f64
+    };
+
+    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%d %H:%M:%S%.f") {
+        return Some(naive_to_timestamp(dt));
+    }
+    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%d %H:%M:%S") {
+        return Some(naive_to_timestamp(dt));
+    }
+
+    None
+}
+
+/// 统一的列解析：接收表头 + 逐列原始字符串，返回 data + columns
+///
+/// raw_cols[i] 对应 header[i] 的所有行字符串值。
+/// 流程：
+///  1. 空列名 → Skip
+///  2. 含时间关键词 → 尝试时间解析；成功 → Time 列
+///  3. 数值检查（valid_ratio ≥ 50%）→ Numeric / Skip
+pub fn parse_columns(
+    header: &[String],
+    raw_cols: &[Vec<String>],
+) -> (HashMap<String, Vec<f64>>, Vec<ColumnInfo>) {
+    let mut data: HashMap<String, Vec<f64>> = HashMap::new();
+    let mut columns: Vec<ColumnInfo> = Vec::new();
+
+    for (i, name) in header.iter().enumerate() {
+        if name.trim().is_empty() {
+            columns.push(ColumnInfo {
+                name: name.clone(),
+                col_type: ColumnType::Skip,
+                min: 0.0,
+                max: 0.0,
+                sample_count: 0,
+            });
+            continue;
+        }
+
+        let values = &raw_cols[i];
+
+        // 时间关键词优先
+        if has_time_keyword(name) {
+            let ts_values: Vec<f64> = values.iter()
+                .map(|v| parse_timestamp_string(v).unwrap_or(f64::NAN))
+                .collect();
+
+            let valid_count = ts_values.iter().filter(|v| v.is_finite()).count();
+            let has_data = !values.is_empty() && valid_count as f64 / values.len() as f64 >= 0.5;
+
+            if has_data {
+                let min = ts_values.iter().cloned()
+                    .filter(|v| v.is_finite())
+                    .fold(f64::INFINITY, f64::min);
+                let max = ts_values.iter().cloned()
+                    .filter(|v| v.is_finite())
+                    .fold(f64::NEG_INFINITY, f64::max);
+                data.insert(name.clone(), ts_values);
+                columns.push(ColumnInfo {
+                    name: name.clone(),
+                    col_type: ColumnType::Time,
+                    min,
+                    max,
+                    sample_count: valid_count,
+                });
+                continue;
+            }
+            // 解析失败，回退到数值判断逻辑
+        }
+
+        // 尝试解析为数值
+        let numeric: Vec<Option<f64>> = values.iter()
+            .map(|v| parse_numeric_with_unit(v.trim()))
+            .collect();
+
+        let valid_count = numeric.iter().filter(|v| v.is_some()).count();
+        let valid_ratio = if values.is_empty() { 0.0 } else { valid_count as f64 / values.len() as f64 };
+
+        if valid_ratio < 0.5 {
+            columns.push(ColumnInfo {
+                name: name.clone(),
+                col_type: ColumnType::Skip,
+                min: 0.0,
+                max: 0.0,
+                sample_count: 0,
+            });
+            continue;
+        }
+
+        let parsed: Vec<f64> = numeric.iter().map(|v| v.unwrap_or(f64::NAN)).collect();
+        let min = parsed.iter().cloned().filter(|v| !v.is_nan()).fold(f64::INFINITY, f64::min);
+        let max = parsed.iter().cloned().filter(|v| !v.is_nan()).fold(f64::NEG_INFINITY, f64::max);
+
+        data.insert(name.clone(), parsed);
+
+        columns.push(ColumnInfo {
+            name: name.clone(),
+            col_type: ColumnType::Numeric,
+            min: if min.is_finite() { min } else { 0.0 },
+            max: if max.is_finite() { max } else { 0.0 },
+            sample_count: valid_count,
+        });
+    }
+
+    (data, columns)
+}
+
+/// 扫描表头和原始数据，查找车架号/VIN 列并返回第一个有效值
+const VIN_KEYWORDS: &[&str] = &["vin", "车架号", "底盘号", "底盘", "车辆识别"];
+
+pub fn find_vin(header: &[String], raw_cols: &[Vec<String>]) -> Option<String> {
+    for (i, name) in header.iter().enumerate() {
+        let lower = name.to_lowercase();
+        if VIN_KEYWORDS.iter().any(|kw| lower.contains(kw)) {
+            // 找到第一个非空值
+            if let Some(values) = raw_cols.get(i) {
+                for v in values {
+                    let trimmed = v.trim();
+                    if !trimmed.is_empty() {
+                        return Some(trimmed.to_string());
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_has_time_keyword() {
+        assert!(has_time_keyword("event_time"));
+        assert!(has_time_keyword("Timestamp"));
+        assert!(has_time_keyword("日期"));
+        assert!(!has_time_keyword("speed"));
+        assert!(!has_time_keyword("voltage"));
+    }
+
+    #[test]
+    fn test_parse_numeric_with_unit() {
+        assert_eq!(parse_numeric_with_unit("100"), Some(100.0));
+        assert_eq!(parse_numeric_with_unit("100V"), Some(100.0));
+        assert_eq!(parse_numeric_with_unit("10.5kW"), Some(10.5));
+        assert_eq!(parse_numeric_with_unit("-25.3"), Some(-25.3));
+        assert_eq!(parse_numeric_with_unit(""), None);
+        assert_eq!(parse_numeric_with_unit("abc"), None);
+    }
+
+    #[test]
+    fn test_parse_timestamp_string_unix() {
+        // Unix timestamp
+        let result = parse_timestamp_string("1704067200");
+        assert_eq!(result, Some(1704067200.0));
+    }
+
+    #[test]
+    fn test_parse_timestamp_string_datetime() {
+        let result = parse_timestamp_string("2024-01-01 00:00:00");
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_parse_columns_basic() {
+        let header = vec!["time".into(), "speed".into(), "voltage".into()];
+        let raw = vec![
+            vec!["0".into(), "1".into(), "2".into()],
+            vec!["10".into(), "20".into(), "30".into()],
+            vec!["15".into(), "25".into(), "35".into()],
+        ];
+        let (data, cols) = parse_columns(&header, &raw);
+        assert_eq!(cols.len(), 3);
+        assert_eq!(cols[0].col_type, ColumnType::Time);
+        assert_eq!(cols[1].col_type, ColumnType::Numeric);
+        assert_eq!(cols[2].col_type, ColumnType::Numeric);
+        assert_eq!(data.len(), 3);
+    }
+
+    #[test]
+    fn test_parse_columns_skip_empty_and_non_numeric() {
+        let header = vec!["".into(), "notes".into(), "value".into()];
+        // raw_cols is column-major: raw_cols[i] = all row values for header[i]
+        let raw: Vec<Vec<String>> = vec![
+            vec!["x".into(), "y".into()],        // column 0 (empty name)
+            vec!["hello".into(), "world".into()], // column 1 (non-numeric)
+            vec!["10".into(), "20".into()],       // column 2 (numeric)
+        ];
+        let (_data, cols) = parse_columns(&header, &raw);
+        assert_eq!(cols[0].col_type, ColumnType::Skip); // empty name
+        assert_eq!(cols[1].col_type, ColumnType::Skip); // non-numeric
+        assert_eq!(cols[2].col_type, ColumnType::Numeric);
+    }
+}
