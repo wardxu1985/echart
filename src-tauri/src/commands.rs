@@ -232,27 +232,24 @@ pub fn create_window(
 
     let window_id = uuid::Uuid::new_v4().to_string();
 
-    // 将 URL 转为 WebviewUrl：http/https 用 External，其余用 App（相对路径或 tauri://）
+    // 将 URL 转为 WebviewUrl
     let webview_url = if url.starts_with("http://") || url.starts_with("https://") {
+        // 外部 http/https URL
         tauri::WebviewUrl::External(
             tauri::Url::parse(&url).map_err(|e| format!("URL解析失败: {}", e))?
         )
     } else {
-        // 对于 tauri:// 或相对路径，提取路径+查询参数，统一用 App 模式
-        let app_path = if url.starts_with("tauri://") {
-            tauri::Url::parse(&url)
-                .map(|p| {
-                    let path = p.path().trim_start_matches('/').to_string();
-                    match p.query() {
-                        Some(q) => format!("{}?{}", path, q),
-                        None => path,
-                    }
-                })
-                .unwrap_or(url)
-        } else {
+        // 相对路径或 tauri://，构造带查询参数的完整 URL 用 External 模式
+        // 否则 WebviewUrl::App 会把查询参数当文件名的一部分
+        let full_url = if url.starts_with("tauri://") {
             url
+        } else {
+            let path = url.trim_start_matches('/');
+            format!("tauri://localhost/{}", path)
         };
-        tauri::WebviewUrl::App(std::path::PathBuf::from(app_path))
+        tauri::WebviewUrl::External(
+            tauri::Url::parse(&full_url).map_err(|e| format!("URL解析失败: {}", e))?
+        )
     };
 
     let builder = WebviewWindowBuilder::new(&app, &window_id, webview_url)
