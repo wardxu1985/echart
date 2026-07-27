@@ -492,6 +492,7 @@ async function onNewWindow() {
 
     // 创建窗口（不传 URL 查询参数），通过 Rust 中转文件信息
     await invoke('create_window', {
+      url: 'index.html',
       title: '信号查看器',
       width: 1400,
       height: 900,
@@ -615,21 +616,14 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('chartPlaceholder').style.display = 'flex';
 
   // 检查是否有来自父窗口的待加载文件（新窗口打开时）
-  // 通过 Tauri 事件机制通知，避免在 init 中异步调用干扰主界面
-  window.__pendingFile = null;
   (async function checkPendingFile() {
     try {
       const pending = await invoke('get_pending_file');
-      window.__pendingFile = pending;
+      if (pending && pending.path) {
+        // 暂存继承信息，loadFile 内部会通过 urlParams 读取
+        // 改为通过 Rust 传递，避免 URL 查询参数
+        await loadFile(pending.path, pending.inherit_from, pending.inherit_columns);
+      }
     } catch (_) {}
   })();
 });
-
-// 延迟检查待加载文件，确保主界面初始化完成后才执行
-setTimeout(async function() {
-  if (window.__pendingFile && window.__pendingFile.path) {
-    const pf = window.__pendingFile;
-    window.__pendingFile = null;
-    await loadFile(pf.path, pf.inherit_from, pf.inherit_columns);
-  }
-}, 200);

@@ -223,6 +223,7 @@ pub fn close_window(
 #[tauri::command]
 pub fn create_window(
     app: AppHandle,
+    url: String,
     title: String,
     width: u32,
     height: u32,
@@ -235,6 +236,10 @@ pub fn create_window(
 
     let window_id = uuid::Uuid::new_v4().to_string();
 
+    // 去掉查询参数，只保留路径部分
+    let path_only = url.split('?').next().unwrap_or(&url).to_string();
+    let webview_url = tauri::WebviewUrl::App(std::path::PathBuf::from(path_only));
+
     // 先存储待加载文件（确保新窗口启动时能读到）
     if let Some(ref path) = file_path {
         let mut pending = state.pending_file.lock().map_err(|e| e.to_string())?;
@@ -245,24 +250,12 @@ pub fn create_window(
         });
     }
 
-    // 创建窗口
-    let webview_url = tauri::WebviewUrl::App(std::path::PathBuf::from("index.html"));
     let builder = WebviewWindowBuilder::new(&app, &window_id, webview_url)
         .title(&title)
         .inner_size(width as f64, height as f64)
         .resizable(true);
 
     builder.build().map_err(|e| format!("创建窗口失败: {}", e))?;
-
-    // 将文件信息暂存，供新窗口启动时取用
-    if let Some(path) = file_path {
-        let mut pending = state.pending_file.lock().map_err(|e| e.to_string())?;
-        *pending = Some(PendingFileData {
-            path,
-            inherit_from,
-            inherit_columns,
-        });
-    }
 
     Ok(())
 }
