@@ -106,6 +106,8 @@ function renderChart(chartData, markers) {
     name: s.name,
     type: 'line',
     data: s.y.map((v, i) => [xData[i], v]),
+    sampling: 'lttb',
+    showSymbol: false,
     symbol: 'circle',
     symbolSize: 2.5,
     lineStyle: { width: 1.5 },
