@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
-use crate::state::{AppState, ChartData, ColumnInfo, ColumnType, FileOpenResult, SeriesData, TimeRange};
+use crate::state::{AppState, ChartData, ColumnInfo, ColumnType, FileOpenResult, PendingFileData, SeriesData, TimeRange};
 use crate::excel_reader::read_excel;
 use crate::csv_reader::read_csv;
 use crate::downsample::detect_gaps;
