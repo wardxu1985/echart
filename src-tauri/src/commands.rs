@@ -236,10 +236,18 @@ pub fn create_window(
 
     let window_id = uuid::Uuid::new_v4().to_string();
 
-    // 去掉查询参数，只保留路径部分
-    let path_only = url.split('?').next().unwrap_or(&url).to_string();
-    let webview_url = tauri::WebviewUrl::App(std::path::PathBuf::from(path_only));
+    // 先存储待加载文件（确保新窗口启动时能读到）
+    if let Some(ref path) = file_path {
+        let mut pending = state.pending_file.lock().map_err(|e| e.to_string())?;
+        *pending = Some(PendingFileData {
+            path: path.clone(),
+            inherit_from,
+            inherit_columns,
+        });
+    }
 
+    // 创建窗口，使用默认 frontendDist 页面（不传 URL 避免路径冲突）
+    let webview_url = tauri::WebviewUrl::App(std::path::PathBuf::new());
     let builder = WebviewWindowBuilder::new(&app, &window_id, webview_url)
         .title(&title)
         .inner_size(width as f64, height as f64)
