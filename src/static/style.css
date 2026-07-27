@@ -517,6 +517,7 @@ html, body {
 }
 
 /* ===== 加载覆盖层 ===== */
+/* 初始状态由 HTML style="display:none" 控制，JS 控制显示/隐藏 */
 #loadingOverlay {
   position: fixed;
   top: 0;
@@ -524,7 +525,6 @@ html, body {
   right: 0;
   bottom: 0;
   background: rgba(255, 255, 255, 0.88);
-  display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;

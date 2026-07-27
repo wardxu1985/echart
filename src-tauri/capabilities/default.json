@@ -1,0 +1,11 @@
+{
+  "identifier": "default",
+  "description": "默认权限：核心操作、窗口管理、文件对话框",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-create",
+    "core:window:allow-close",
+    "dialog:default"
+  ]
+}
