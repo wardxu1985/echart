@@ -227,30 +227,18 @@ pub fn create_window(
     title: String,
     width: u32,
     height: u32,
+    file_path: Option<String>,
+    inherit_from: Option<String>,
+    inherit_columns: Option<String>,
+    state: State<'_, AppState>,
 ) -> Result<(), String> {
     use tauri::WebviewWindowBuilder;
 
     let window_id = uuid::Uuid::new_v4().to_string();
 
-    // 将 URL 转为 WebviewUrl
-    let webview_url = if url.starts_with("http://") || url.starts_with("https://") {
-        // 外部 http/https URL
-        tauri::WebviewUrl::External(
-            tauri::Url::parse(&url).map_err(|e| format!("URL解析失败: {}", e))?
-        )
-    } else {
-        // 相对路径或 tauri://，构造带查询参数的完整 URL 用 External 模式
-        // 否则 WebviewUrl::App 会把查询参数当文件名的一部分
-        let full_url = if url.starts_with("tauri://") {
-            url
-        } else {
-            let path = url.trim_start_matches('/');
-            format!("tauri://localhost/{}", path)
-        };
-        tauri::WebviewUrl::External(
-            tauri::Url::parse(&full_url).map_err(|e| format!("URL解析失败: {}", e))?
-        )
-    };
+    // 去掉查询参数，只保留路径部分
+    let path_only = url.split('?').next().unwrap_or(&url).to_string();
+    let webview_url = tauri::WebviewUrl::App(std::path::PathBuf::from(path_only));
 
     let builder = WebviewWindowBuilder::new(&app, &window_id, webview_url)
         .title(&title)
@@ -258,7 +246,26 @@ pub fn create_window(
         .resizable(true);
 
     builder.build().map_err(|e| format!("创建窗口失败: {}", e))?;
+
+    // 将文件信息暂存，供新窗口启动时取用
+    if let Some(path) = file_path {
+        let mut pending = state.pending_file.lock().map_err(|e| e.to_string())?;
+        *pending = Some(PendingFileData {
+            path,
+            inherit_from,
+            inherit_columns,
+        });
+    }
+
     Ok(())
+}
+
+#[tauri::command]
+pub fn get_pending_file(
+    state: State<'_, AppState>,
+) -> Result<Option<PendingFileData>, String> {
+    let mut pending = state.pending_file.lock().map_err(|e| e.to_string())?;
+    Ok(pending.take())
 }
 
 #[tauri::command]

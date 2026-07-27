@@ -52,12 +52,21 @@ pub struct WindowState {
 
 pub struct AppState {
     pub windows: Mutex<HashMap<String, WindowState>>,
+    pub pending_file: Mutex<Option<PendingFileData>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingFileData {
+    pub path: String,
+    pub inherit_from: Option<String>,
+    pub inherit_columns: Option<String>,
 }
 
 impl AppState {
     pub fn new() -> Self {
         Self {
             windows: Mutex::new(HashMap::new()),
+            pending_file: Mutex::new(None),
         }
     }
 }

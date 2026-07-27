@@ -270,7 +270,7 @@ async function onOpenFile() {
   }
 }
 
-async function loadFile(path) {
+async function loadFile(path, inheritFrom, inheritColumns) {
   const fileName = path.split(/[/\\]/).pop();
 
   const overlay = document.getElementById('loadingOverlay');
@@ -278,9 +278,7 @@ async function loadFile(path) {
   overlay.style.display = 'flex';
 
   try {
-    const urlParams = getUrlParams();
-    const inheritFrom = urlParams.from || null;
-    const result = await TauriBridge.openFile(path, inheritFrom);
+    const result = await TauriBridge.openFile(path, inheritFrom || null);
 
     if (!result || !result.columns) {
       overlay.style.display = 'none';
@@ -316,8 +314,8 @@ async function loadFile(path) {
     document.getElementById('signalSearch').value = '';
 
     // 处理继承信号
-    if (urlParams.inheritColumns) {
-      const inherited = urlParams.inheritColumns.split(',');
+    if (inheritColumns) {
+      const inherited = inheritColumns.split(',');
       inherited.forEach(name => {
         if (state.numericColumns.some(c => c.name === name)) {
           state.selectedYCols.add(name);
@@ -491,13 +489,16 @@ async function onNewWindow() {
     if (!selected) return;
 
     const inheritCols = Array.from(state.selectedYCols).join(',');
-    const newWindowUrl = `index.html?file=${encodeURIComponent(selected)}&inherit=${encodeURIComponent(inheritCols)}&from=${state.windowId}`;
 
+    // 创建窗口（不传 URL 查询参数），通过 Rust 中转文件信息
     await invoke('create_window', {
-      url: newWindowUrl,
+      url: 'index.html',
       title: '信号查看器',
       width: 1400,
       height: 900,
+      filePath: selected,
+      inheritFrom: state.windowId,
+      inheritColumns: inheritCols,
     });
 
     showToast('新窗口已创建', 'success');
@@ -614,10 +615,15 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('chartContainer').style.display = 'none';
   document.getElementById('chartPlaceholder').style.display = 'flex';
 
-  // 自动加载 URL 中指定的文件（新窗口打开时）
-  // 注意：必须同时有 file 和 from 参数才自动加载，防止 Windows WebView2 误判 URL
-  const urlParams = getUrlParams();
-  if (urlParams.filePath && urlParams.from) {
-    loadFile(urlParams.filePath);
-  }
+  // 检查是否有来自父窗口的待加载文件（新窗口打开时）
+  (async function checkPendingFile() {
+    try {
+      const pending = await invoke('get_pending_file');
+      if (pending && pending.path) {
+        // 暂存继承信息，loadFile 内部会通过 urlParams 读取
+        // 改为通过 Rust 传递，避免 URL 查询参数
+        await loadFile(pending.path, pending.inherit_from, pending.inherit_columns);
+      }
+    } catch (_) {}
+  })();
 });
