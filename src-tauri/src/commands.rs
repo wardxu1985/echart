@@ -223,7 +223,7 @@ pub fn close_window(
 #[tauri::command]
 pub fn create_window(
     app: AppHandle,
-    url: String,
+    _url: String,
     title: String,
     width: u32,
     height: u32,
@@ -246,8 +246,8 @@ pub fn create_window(
         });
     }
 
-    // 创建窗口，使用默认 frontendDist 页面（不传 URL 避免路径冲突）
-    let webview_url = tauri::WebviewUrl::App(std::path::PathBuf::new());
+    // 创建窗口，使用默认 frontendDist 页面（空路径指向 index.html）
+    let webview_url = tauri::WebviewUrl::App(std::path::PathBuf::from("index.html"));
     let builder = WebviewWindowBuilder::new(&app, &window_id, webview_url)
         .title(&title)
         .inner_size(width as f64, height as f64)
