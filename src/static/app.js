@@ -536,6 +536,10 @@ window.addEventListener('beforeunload', () => {
 
 // ===== 初始化 =====
 document.addEventListener('DOMContentLoaded', () => {
+  // 确保加载遮罩层初始隐藏（多重保障）
+  const loadingOverlay = document.getElementById('loadingOverlay');
+  if (loadingOverlay) loadingOverlay.style.display = 'none';
+
   // 从 Rust 获取版本号
   invoke('get_version').then(v => {
     document.getElementById('menuVersion').textContent = v;
