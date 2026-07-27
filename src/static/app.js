@@ -615,8 +615,9 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('chartPlaceholder').style.display = 'flex';
 
   // 自动加载 URL 中指定的文件（新窗口打开时）
+  // 注意：必须同时有 file 和 from 参数才自动加载，防止 Windows WebView2 误判 URL
   const urlParams = getUrlParams();
-  if (urlParams.filePath) {
+  if (urlParams.filePath && urlParams.from) {
     loadFile(urlParams.filePath);
   }
 });
