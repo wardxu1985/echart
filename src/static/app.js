@@ -492,7 +492,6 @@ async function onNewWindow() {
 
     // 创建窗口（不传 URL 查询参数），通过 Rust 中转文件信息
     await invoke('create_window', {
-      url: 'index.html',
       title: '信号查看器',
       width: 1400,
       height: 900,
