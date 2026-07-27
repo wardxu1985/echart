@@ -569,9 +569,9 @@ html, body {
 }
 
 @keyframes loadingBarShimmer {
-  0%   { width: 8%;  opacity: 0.5; transform: translateX(-100%); }
-  50%  { width: 60%; opacity: 1;   transform: translateX(20%); }
-  100% { width: 8%;  opacity: 0.5; transform: translateX(100%); }
+  0%   { width: 8%;  opacity: 0.5; }
+  50%  { width: 60%; opacity: 1; }
+  100% { width: 8%;  opacity: 0.5; }
 }
 
 @keyframes spin {
