@@ -32,31 +32,59 @@ function initChart() {
   window.addEventListener('resize', chartResizeHandler);
 }
 
-function renderChart(chartData, markers) {
+function renderChart(chartData, markers, groups) {
   markers = markers || [];
+  groups = groups || [];
   initChart();
 
-  const count = chartData.series.length;
-  const xData = chartData.x.map(ts => new Date(ts));
+  // 建立 signalName → gridIndex 映射
+  var gridMap = {};
+  var gridIdx = 0;
+  for (var i = 0; i < chartData.series.length; i++) {
+    var name = chartData.series[i].name;
+    if (gridMap[name] !== undefined) continue;
+    // 检查该信号是否在合并组中
+    var foundGroup = null;
+    for (var g = 0; g < groups.length; g++) {
+      if (groups[g].signals.indexOf(name) !== -1) {
+        foundGroup = groups[g];
+        break;
+      }
+    }
+    if (foundGroup) {
+      foundGroup.signals.forEach(function (sn) { gridMap[sn] = gridIdx; });
+    } else {
+      gridMap[name] = gridIdx;
+    }
+    gridIdx++;
+  }
 
-  // 子图高度：最多显示 10 个在可见区域，最高不超过 200px
-  const SUBPLOT_VISIBLE = Math.min(count, 10);
-  const availHeight = window.innerHeight - 170;
-  const PANEL_HEIGHT = Math.max(75, Math.min(200, Math.floor(availHeight / SUBPLOT_VISIBLE)));
-  const GAP = 4;
-  const ZOOM_HEIGHT = 30;
-  const totalHeight = count * PANEL_HEIGHT + (count - 1) * GAP + ZOOM_HEIGHT;
+  var subplotCount = gridIdx;
+  var xData = chartData.x.map(function (ts) { return new Date(ts); });
 
-  const container = document.getElementById('chartContainer');
+  var SUBPLOT_VISIBLE = Math.min(subplotCount, 10);
+  var availHeight = window.innerHeight - 170;
+  var PANEL_HEIGHT = Math.max(75, Math.min(200, Math.floor(availHeight / SUBPLOT_VISIBLE)));
+  var GAP = 4;
+  var ZOOM_HEIGHT = 30;
+  var totalHeight = subplotCount * PANEL_HEIGHT + (subplotCount - 1) * GAP + ZOOM_HEIGHT;
+
+  var container = document.getElementById('chartContainer');
   container.style.height = totalHeight + 'px';
 
-  const grids = [];
-  const xAxes = [];
-  const yAxes = [];
+  var grids = [];
+  var xAxes = [];
+  var yAxes = [];
 
-  chartData.series.forEach((s, idx) => {
-    const top = idx * (PANEL_HEIGHT + GAP);
-    const isLast = idx === count - 1;
+  // 为每个子图创建 grid/xAxis/yAxis
+  var subplotNames = [];
+  var seriesBySubplot = [];
+  for (var gi = 0; gi < subplotCount; gi++) {
+    var names = chartData.series.filter(function (s) { return gridMap[s.name] === gi; }).map(function (s) { return s.name; });
+    subplotNames.push(names);
+
+    var top = gi * (PANEL_HEIGHT + GAP);
+    var isLast = gi === subplotCount - 1;
 
     grids.push({
       show: true,
@@ -70,7 +98,7 @@ function renderChart(chartData, markers) {
 
     xAxes.push({
       type: 'time',
-      gridIndex: idx,
+      gridIndex: gi,
       show: isLast,
       axisLine: isLast ? { lineStyle: { color: '#d0d5dd' } } : { show: false },
       axisTick: { show: false },
@@ -80,8 +108,8 @@ function renderChart(chartData, markers) {
 
     yAxes.push({
       type: 'value',
-      gridIndex: idx,
-      name: s.name,
+      gridIndex: gi,
+      name: names.join(' / '),
       nameLocation: 'middle',
       nameGap: 18,
       nameRotate: 90,
@@ -100,41 +128,48 @@ function renderChart(chartData, markers) {
       axisLabel: { fontSize: 8, color: '#9aa0a6' },
       splitLine: { show: true, lineStyle: { color: '#e5e7eb', type: 'solid' } },
     });
+  }
+
+  var series = chartData.series.map(function (s, idx) {
+    var gi = gridMap[s.name] || 0;
+    return {
+      name: s.name,
+      type: 'line',
+      sampling: 'lttb',
+      data: s.y.map(function (v, i) { return [xData[i], v]; }),
+      symbol: 'circle',
+      symbolSize: 2.5,
+      lineStyle: { width: 1.5 },
+      xAxisIndex: gi,
+      yAxisIndex: gi,
+      connectNulls: false,
+      itemStyle: { color: CANAPE_COLORS[idx % CANAPE_COLORS.length] },
+      emphasis: {
+        itemStyle: { color: CANAPE_COLORS[idx % CANAPE_COLORS.length] },
+        lineStyle: { width: 2 },
+      },
+      markLine: {
+        silent: true,
+        symbol: 'none',
+        label: { show: false },
+        lineStyle: { color: '#a0a4ac', width: 1.5, type: 'solid' },
+        data: [
+          { yAxis: 0 },
+        ].concat(markers.map(function (m, mi) {
+          var val = m.values[s.name];
+          var labelText = (val != null && isFinite(val)) ? (idx === 0 ? 'M' + (mi + 1) + ' ' + formatNum(val) : formatNum(val)) : (idx === 0 ? 'M' + (mi + 1) : '');
+          return {
+            xAxis: m.time,
+            lineStyle: { color: '#d32f2f', type: 'dashed', width: 1.5 },
+            label: { show: true, position: 'insideEndTop', formatter: labelText, fontSize: 9, color: '#d32f2f', backgroundColor: '#fff' },
+          };
+        })),
+      },
+    };
   });
 
-  const series = chartData.series.map((s, idx) => ({
-    name: s.name,
-    type: 'line',
-    data: s.y.map((v, i) => [xData[i], v]),
-    symbol: 'circle',
-    symbolSize: 2.5,
-    lineStyle: { width: 1.5 },
-    xAxisIndex: idx,
-    yAxisIndex: idx,
-    connectNulls: false,
-    itemStyle: { color: CANAPE_COLORS[idx % CANAPE_COLORS.length] },
-    emphasis: {
-      itemStyle: { color: CANAPE_COLORS[idx % CANAPE_COLORS.length] },
-      lineStyle: { width: 2 },
-    },
-    markLine: {
-      silent: true,
-      symbol: 'none',
-      label: { show: false },
-      lineStyle: { color: '#a0a4ac', width: 1.5, type: 'solid' },
-      data: [
-        { yAxis: 0 },
-      ].concat(markers.map(function (m, mi) {
-        var val = m.values[s.name];
-        var labelText = (val != null && isFinite(val)) ? (idx === 0 ? 'M' + (mi + 1) + ' ' + formatNum(val) : formatNum(val)) : (idx === 0 ? 'M' + (mi + 1) : '');
-        return {
-          xAxis: m.time,
-          lineStyle: { color: '#d32f2f', type: 'dashed', width: 1.5 },
-          label: { show: true, position: 'insideEndTop', formatter: labelText, fontSize: 9, color: '#d32f2f', backgroundColor: '#fff' },
-        };
-      })),
-    },
-  }));
+  var allGridIndices = [];
+  for (var gi = 0; gi < subplotCount; gi++) allGridIndices.push(gi);
 
   chart.setOption({
     tooltip: {
@@ -146,17 +181,16 @@ function renderChart(chartData, markers) {
       padding: [8, 12],
       formatter: function(params) {
         if (!params || params.length === 0) return '';
-        const time = params[0].axisValue;
-        const d = new Date(time);
-        const ts = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
-        let html = `<div style="font-size:11px;color:#5f6b7a;margin-bottom:3px;">${ts}</div>`;
-        params.forEach(p => {
+        var time = params[0].axisValue;
+        var d = new Date(time);
+        var ts = String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0') + ':' + String(d.getSeconds()).padStart(2,'0');
+        var html = '<div style="font-size:11px;color:#5f6b7a;margin-bottom:3px;">' + ts + '</div>';
+        params.forEach(function (p) {
           if (p.value && p.value[1] != null) {
-            const v = typeof p.value[1] === 'number' ? p.value[1].toFixed(2) : p.value[1];
-            html += `<div style="font-size:12px;line-height:1.5;display:flex;justify-content:space-between;gap:12px;">
-              <span style="color:#1a1a2e;">${p.marker} ${p.seriesName}</span>
-              <span style="font-family:Consolas,monospace;color:#2b5fa8;font-weight:bold;">${v}</span>
-            </div>`;
+            var v = typeof p.value[1] === 'number' ? p.value[1].toFixed(2) : p.value[1];
+            html += '<div style="font-size:12px;line-height:1.5;display:flex;justify-content:space-between;gap:12px;">' +
+              '<span style="color:#1a1a2e;">' + p.marker + ' ' + p.seriesName + '</span>' +
+              '<span style="font-family:Consolas,monospace;color:#2b5fa8;font-weight:bold;">' + v + '</span></div>';
           }
         });
         return html;
@@ -165,7 +199,7 @@ function renderChart(chartData, markers) {
     grid: grids,
     xAxis: xAxes,
     yAxis: yAxes,
-    series,
+    series: series,
     axisPointer: {
       link: [{ xAxisIndex: 'all' }],
       label: {
@@ -179,13 +213,13 @@ function renderChart(chartData, markers) {
     dataZoom: [
       {
         type: 'inside',
-        xAxisIndex: chartData.series.map((_, i) => i),
+        xAxisIndex: allGridIndices,
         start: 0,
         end: 100,
       },
       {
         type: 'slider',
-        xAxisIndex: chartData.series.map((_, i) => i),
+        xAxisIndex: allGridIndices,
         start: 0,
         end: 100,
         bottom: 0,
@@ -199,7 +233,6 @@ function renderChart(chartData, markers) {
     ],
   });
 
-  // 点击信号添加记号标记
   chart.off('click');
   chart.on('click', function (params) {
     if (params.componentType === 'series' && params.value && params.value[0]) {

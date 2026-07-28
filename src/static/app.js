@@ -35,12 +35,78 @@ var state = {
   windowId: '',
   columns: [],
   selectedXCol: null,
-  selectedYCols: new Set(),
+  selectedYCols: [],  // 有序数组，顺序决定子图顺序
+  signalGroups: [],   // [{signals: ["rpm", "torque"]}] 表示合并到同一子图
   rawColumns: [],
   numericColumns: [],
   fileLoaded: false,
   timeRange: null,
 };
+
+// ===== 信号选择辅助函数 =====
+function addSelectedSignal(name) {
+  if (!state.selectedYCols.includes(name)) {
+    state.selectedYCols.push(name);
+  }
+}
+function removeSelectedSignal(name) {
+  // 先从合并组中移除
+  for (var i = 0; i < state.signalGroups.length; i++) {
+    var idx = state.signalGroups[i].signals.indexOf(name);
+    if (idx !== -1) {
+      state.signalGroups[i].signals.splice(idx, 1);
+      if (state.signalGroups[i].signals.length < 2) {
+        // 组内不足 2 个信号，解散该组
+        state.signalGroups.splice(i, 1);
+      }
+      break;
+    }
+  }
+  // 再从平铺列表中移除
+  var idx = state.selectedYCols.indexOf(name);
+  if (idx !== -1) state.selectedYCols.splice(idx, 1);
+}
+function hasSelectedSignal(name) {
+  return state.selectedYCols.includes(name);
+}
+function getSignalGroup(name) {
+  for (var i = 0; i < state.signalGroups.length; i++) {
+    if (state.signalGroups[i].signals.includes(name)) return state.signalGroups[i];
+  }
+  return null;
+}
+function flatSelected() {
+  return state.selectedYCols;
+}
+function subplotCount() {
+  // 合并组中的 N 个信号只占 1 个子图，其余每个信号占 1 个
+  var merged = 0;
+  state.signalGroups.forEach(function (g) { merged += g.signals.length - 1; });
+  return state.selectedYCols.length - merged;
+}
+
+// ===== 搜索式下拉框实例 =====
+var signalADropdown = createSearchableDropdown({
+  inputId: 'signalAInput',
+  listId: 'signalAList',
+  containerId: 'signalADropdown',
+  placeholder: '— 信号 A —',
+  onSelect: function () {
+    updateComputeAutoName();
+    updateComputeButton();
+  },
+});
+
+var signalBDropdown = createSearchableDropdown({
+  inputId: 'signalBInput',
+  listId: 'signalBList',
+  containerId: 'signalBDropdown',
+  placeholder: '— 信号 B —',
+  onSelect: function () {
+    updateComputeAutoName();
+    updateComputeButton();
+  },
+});
 
 // ===== Toast 系统 =====
 function showToast(msg, type = 'info', duration = 3000) {
@@ -88,6 +154,133 @@ function formatTimestamp(ts) {
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
+// ===== 搜索式下拉框组件 =====
+function createSearchableDropdown(config) {
+  const { inputId, listId, containerId, placeholder, onSelect } = config;
+  const input = document.getElementById(inputId);
+  const list = document.getElementById(listId);
+  const container = document.getElementById(containerId);
+
+  let items = [];
+  let selectedValue = '';
+  let highlightedIndex = -1;
+  let isOpen = false;
+
+  function renderList(filtered) {
+    if (!filtered || filtered.length === 0) {
+      list.innerHTML = '<div class="dropdown-empty">无匹配信号</div>';
+      isOpen = true;
+      list.style.display = 'block';
+      return;
+    }
+    list.innerHTML = filtered.map((item, i) => {
+      const hl = i === highlightedIndex ? ' highlighted' : '';
+      const sel = item.name === selectedValue ? ' selected' : '';
+      return `<div class="dropdown-item${hl}${sel}" data-value="${item.name}">${escapeHtml(item.name)}</div>`;
+    }).join('');
+    if (highlightedIndex >= 0 && highlightedIndex < filtered.length) {
+      const el = list.children[highlightedIndex];
+      if (el) el.scrollIntoView({ block: 'nearest' });
+    }
+    isOpen = true;
+    list.style.display = 'block';
+  }
+
+  function filterItems(query) {
+    if (!query) return items;
+    const q = query.toLowerCase();
+    return items.filter(item => item.name.toLowerCase().includes(q));
+  }
+
+  function openDropdown() {
+    if (input.disabled) return;
+    highlightedIndex = -1;
+    // 打开时显示全部信号，不按已有值过滤，方便切换选择
+    renderList(items);
+  }
+
+  function closeDropdown() {
+    isOpen = false;
+    list.style.display = 'none';
+  }
+
+  function selectItem(value) {
+    selectedValue = value;
+    input.value = value;
+    closeDropdown();
+    if (onSelect) onSelect(value);
+  }
+
+  function populate(newItems) {
+    items = newItems || [];
+    if (!selectedValue || !items.some(i => i.name === selectedValue)) {
+      selectedValue = '';
+      input.value = '';
+    }
+    input.placeholder = placeholder;
+  }
+
+  // 输入框焦点
+  input.addEventListener('focus', openDropdown);
+  input.addEventListener('click', openDropdown);
+
+  // 输入过滤
+  input.addEventListener('input', function () {
+    highlightedIndex = -1;
+    selectedValue = '';
+    renderList(filterItems(this.value));
+  });
+
+  // 键盘导航
+  input.addEventListener('keydown', function (e) {
+    const visibleItems = list.querySelectorAll('.dropdown-item');
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (!isOpen) { openDropdown(); return; }
+      highlightedIndex = Math.min(highlightedIndex + 1, visibleItems.length - 1);
+      renderList(filterItems(input.value));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      highlightedIndex = Math.max(highlightedIndex - 1, 0);
+      renderList(filterItems(input.value));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (highlightedIndex >= 0 && visibleItems[highlightedIndex]) {
+        selectItem(visibleItems[highlightedIndex].dataset.value);
+      } else if (visibleItems.length === 1) {
+        selectItem(visibleItems[0].dataset.value);
+      }
+    } else if (e.key === 'Escape') {
+      closeDropdown();
+      input.blur();
+    }
+  });
+
+  // 点击列表项
+  list.addEventListener('mousedown', function (e) {
+    const item = e.target.closest('.dropdown-item');
+    if (item && item.dataset.value) {
+      selectItem(item.dataset.value);
+    }
+  });
+
+  // 点击外部关闭
+  document.addEventListener('mousedown', function (e) {
+    if (!container.contains(e.target)) {
+      closeDropdown();
+    }
+  });
+
+  return {
+    populate,
+    getValue: function () { return selectedValue; },
+    setValue: function (name) { selectItem(name); },
+    enable: function () { input.disabled = false; },
+    disable: function () { input.disabled = true; input.value = ''; selectedValue = ''; closeDropdown(); },
+    getInput: function () { return input; },
+  };
+}
+
 // ===== 左面板交互 =====
 function populateXSelect(columns) {
   const select = document.getElementById('xSelect');
@@ -120,21 +313,262 @@ function renderSignalTags() {
   const container = document.getElementById('signalTags');
   const countEl = document.getElementById('signalCount');
   container.innerHTML = '';
-  state.selectedYCols.forEach(name => {
-    const tag = document.createElement('span');
-    tag.className = 'signal-tag';
-    tag.innerHTML = `${escapeHtml(name)} <span class="tag-remove" data-name="${escapeHtml(name)}">×</span>`;
-    tag.querySelector('.tag-remove').addEventListener('click', (e) => {
-      e.stopPropagation();
-      const colName = e.target.getAttribute('data-name');
-      state.selectedYCols.delete(colName);
-      renderSignalTags();
-      updateGenerateButton();
-      updateStatusBar();
-    });
-    container.appendChild(tag);
+  var len = state.selectedYCols.length;
+  var totalSignals = 0;
+  state.selectedYCols.forEach(function (name) {
+    var group = getSignalGroup(name);
+    if (group) {
+      if (group.signals[0] === name) {
+        // 每组只渲染一次，显示合并名
+        renderTag(container, group.signals, group.signals[0], len);
+        totalSignals += group.signals.length;
+      }
+    } else {
+      renderTag(container, name, name, len);
+      totalSignals++;
+    }
   });
-  countEl.textContent = `已选 ${state.selectedYCols.size} 个信号`;
+  countEl.textContent = '已选 ' + totalSignals + ' 个信号 / ' + subplotCount() + ' 子图';
+}
+
+function renderTag(container, names, key, totalLen) {
+  var isGroup = Array.isArray(names);
+  var nameStr = isGroup ? names.join(', ') : names;
+  var tag = document.createElement('span');
+  tag.className = 'signal-tag' + (isGroup ? ' group-tag' : '');
+  tag.dataset.name = key;
+  tag.dataset.names = isGroup ? JSON.stringify(names) : names;
+
+  var upBtn = '';
+  var downBtn = '';
+  if (totalLen > 1) {
+    upBtn = '<span class="tag-move" data-dir="up">▲</span>';
+    downBtn = '<span class="tag-move" data-dir="dn">▼</span>';
+  }
+  tag.innerHTML = upBtn + ' ' + escapeHtml(nameStr) + ' <span class="tag-remove" data-names="' + escapeHtml(isGroup ? JSON.stringify(names) : names) + '">×</span> ' + downBtn;
+
+  // 上移/下移按钮
+  tag.querySelectorAll('.tag-move').forEach(function(btn) {
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var dir = this.dataset.dir;
+      var currIdx = state.selectedYCols.indexOf(key);
+      if (dir === 'up' && currIdx > 0) {
+        swapSignals(currIdx, currIdx - 1);
+      } else if (dir === 'dn' && currIdx < state.selectedYCols.length - 1) {
+        swapSignals(currIdx, currIdx + 1);
+      }
+      renderSignalTags();
+      showToast('信号顺序已更新，点击"生成图表"刷新', 'info');
+    });
+  });
+
+  // 删除按钮
+  tag.querySelector('.tag-remove').addEventListener('click', function (e) {
+    e.stopPropagation();
+    // 从父标签的 dataset.names 读取（JS 设置，无转义问题）
+    var parentTag = this.closest('.signal-tag');
+    if (!parentTag) return;
+    var raw = parentTag.dataset.names;
+    var removeNames = raw.indexOf('[') === 0 ? JSON.parse(raw) : [raw];
+    removeNames.forEach(function (n) { removeSelectedSignal(n); });
+    renderSignalTags();
+    updateGenerateButton();
+    updateStatusBar();
+  });
+
+  // 鼠标拖拽
+  tag.addEventListener('mousedown', function (e) {
+    if (e.button !== 0) return;
+    if (e.target.closest('.tag-move')) return;
+    if (e.target.closest('.tag-remove')) return;
+    // 如果拖拽源在合并组内，用组内第一个信号作为 key
+    var dragNames = this.dataset.names.indexOf('[') === 0 ? JSON.parse(this.dataset.names) : [this.dataset.name];
+    _dragState = {
+      fromNames: dragNames,
+      fromName: dragNames[0],
+      tag: this,
+      startX: e.clientX,
+      startY: e.clientY,
+      clone: null,
+      started: false,
+      hoverTarget: null,
+      dropZone: null,
+    };
+    document.addEventListener('mousemove', onDragMove);
+    document.addEventListener('mouseup', onDragEnd);
+    e.preventDefault();
+  });
+
+  container.appendChild(tag);
+}
+
+function computeDropZone(tagEl, clientX) {
+  var rect = tagEl.getBoundingClientRect();
+  var relX = clientX - rect.left;
+  var w = rect.width;
+  if (relX < w * 0.35) return 'before';
+  if (relX > w * 0.65) return 'after';
+  return 'merge';
+}
+
+function swapSignals(i, j) {
+  var arr = state.selectedYCols;
+  var tmp = arr[i];
+  arr[i] = arr[j];
+  arr[j] = tmp;
+}
+
+function moveSignal(fromName, toName) {
+  var arr = state.selectedYCols;
+  var fromIdx = arr.indexOf(fromName);
+  var toIdx = arr.indexOf(toName);
+  if (fromIdx === -1 || toIdx === -1) return;
+  arr.splice(fromIdx, 1);
+  var newToIdx = arr.indexOf(toName);
+  arr.splice(newToIdx + (fromIdx < toIdx ? 1 : 0), 0, fromName);
+}
+
+// ===== 鼠标拖拽排序 =====
+var _dragState = null;
+
+function onDragMove(e) {
+  var s = _dragState;
+  if (!s) return;
+
+  if (!s.started) {
+    var dx = e.clientX - s.startX;
+    var dy = e.clientY - s.startY;
+    if (dx * dx + dy * dy < 25) return;
+    s.started = true;
+
+    var rect = s.tag.getBoundingClientRect();
+    s.clone = s.tag.cloneNode(true);
+    s.clone.style.position = 'fixed';
+    s.clone.style.left = rect.left + 'px';
+    s.clone.style.top = rect.top + 'px';
+    s.clone.style.width = rect.width + 'px';
+    s.clone.style.pointerEvents = 'none';
+    s.clone.style.zIndex = 10000;
+    s.clone.style.opacity = '0.85';
+    s.clone.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+    s.clone.style.transform = 'rotate(2deg)';
+    s.clone.style.borderRadius = '4px';
+    s.tag.style.opacity = '0.3';
+    document.body.appendChild(s.clone);
+  }
+
+  var dx = e.clientX - s.startX;
+  var dy = e.clientY - s.startY;
+  s.clone.style.transform = 'translate(' + dx + 'px, ' + dy + 'px) rotate(2deg)';
+
+  // 清除所有旧高亮
+  document.querySelectorAll('#signalTags .signal-tag').forEach(function (t) {
+    t.classList.remove('drop-before', 'drop-merge', 'drop-after');
+  });
+
+  // 检测鼠标下方的标签和投放区域
+  var el = document.elementFromPoint(e.clientX, e.clientY);
+  while (el && el !== document) {
+    if (el.classList && el.classList.contains('signal-tag') && el !== s.tag) {
+      var zone = computeDropZone(el, e.clientX);
+      if (zone === 'before') el.classList.add('drop-before');
+      else if (zone === 'merge') el.classList.add('drop-merge');
+      else el.classList.add('drop-after');
+      s.hoverTarget = el.dataset.name;
+      s.dropZone = zone;
+      return;
+    }
+    el = el.parentElement;
+  }
+  s.hoverTarget = null;
+  s.dropZone = null;
+}
+
+function onDragEnd(e) {
+  var s = _dragState;
+  if (!s) return;
+  document.removeEventListener('mousemove', onDragMove);
+  document.removeEventListener('mouseup', onDragEnd);
+
+  if (s.clone) document.body.removeChild(s.clone);
+  document.querySelectorAll('#signalTags .signal-tag').forEach(function (t) {
+    t.classList.remove('drop-before', 'drop-merge', 'drop-after');
+  });
+  if (s.tag) s.tag.style.opacity = '';
+
+  var fromNames = s.fromNames;
+  var fromName = s.fromName;
+  var targetName = s.hoverTarget;
+  var zone = s.dropZone;
+  _dragState = null;
+
+  if (!targetName || fromName === targetName) return;
+
+  if (zone === 'before' || zone === 'after') {
+    // 调序：从合并组或单独信号移动到目标前/后
+    // 先从原位置移除 fromNames 中所有信号
+    var flat = state.selectedYCols;
+    var removed = [];
+    fromNames.forEach(function (n) {
+      var idx = flat.indexOf(n);
+      if (idx !== -1) { removed.push({ name: n, idx: idx }); }
+    });
+    // 从后往前删，索引不变
+    removed.sort(function (a, b) { return b.idx - a.idx; });
+    removed.forEach(function (r) { flat.splice(r.idx, 1); });
+
+    // 在减掉 group 后找目标信号的新位置
+    var toIdx = flat.indexOf(targetName);
+    if (toIdx === -1) { renderSignalTags(); return; }
+
+    var insertAt = zone === 'before' ? toIdx : toIdx + 1;
+    // 将被拖信号全部插入
+    fromNames.forEach(function (n) {
+      flat.splice(insertAt, 0, n);
+      insertAt++;
+    });
+
+    // 拖出合并组后，检查原组是否需要解散
+    for (var gi = state.signalGroups.length - 1; gi >= 0; gi--) {
+      var g = state.signalGroups[gi];
+      for (var fi = 0; fi < fromNames.length; fi++) {
+        var si = g.signals.indexOf(fromNames[fi]);
+        if (si !== -1) g.signals.splice(si, 1);
+      }
+      if (g.signals.length < 2) state.signalGroups.splice(gi, 1);
+    }
+  } else if (zone === 'merge') {
+    // 合并：不修改平铺列表 selectedYCols，只更新 signalGroups
+    // 先将 fromNames 从原组中拆除
+    for (var gi = state.signalGroups.length - 1; gi >= 0; gi--) {
+      var g = state.signalGroups[gi];
+      for (var fi = 0; fi < fromNames.length; fi++) {
+        var si = g.signals.indexOf(fromNames[fi]);
+        if (si !== -1) g.signals.splice(si, 1);
+      }
+      if (g.signals.length < 2) state.signalGroups.splice(gi, 1);
+    }
+
+    // 找到目标信号所在的组，或创建新组
+    var targetGroup = getSignalGroup(targetName);
+    if (targetGroup) {
+      fromNames.forEach(function (n) {
+        if (n !== targetName && !targetGroup.signals.includes(n)) targetGroup.signals.push(n);
+      });
+    } else {
+      var newGroup = { signals: [targetName] };
+      fromNames.forEach(function (n) {
+        if (n !== targetName && !newGroup.signals.includes(n)) newGroup.signals.push(n);
+      });
+      state.signalGroups.push(newGroup);
+    }
+  }
+
+  renderSignalTags();
+  updateGenerateButton();
+  updateStatusBar();
+  showToast(zone === 'merge' ? '信号已合并到同一子图' : '信号顺序已更新', 'info');
 }
 
 function updateGenerateButton() {
@@ -142,42 +576,28 @@ function updateGenerateButton() {
   btn.disabled = !(
     state.fileLoaded &&
     state.selectedXCol &&
-    state.selectedYCols.size > 0
+    state.selectedYCols.length > 0
   );
 }
 
 // ===== 信号运算 =====
 function populateComputeSelectors() {
-  const selA = document.getElementById('computeSignalA');
-  const selB = document.getElementById('computeSignalB');
-  const currentA = selA.value;
-  const currentB = selB.value;
+  const currentA = signalADropdown.getValue();
+  const currentB = signalBDropdown.getValue();
 
-  selA.innerHTML = '<option value="">— 信号 A —</option>';
-  selB.innerHTML = '<option value="">— 信号 B —</option>';
+  signalADropdown.populate(state.numericColumns);
+  signalBDropdown.populate(state.numericColumns);
 
-  state.numericColumns.forEach(col => {
-    const optA = document.createElement('option');
-    optA.value = col.name;
-    optA.textContent = col.name;
-    selA.appendChild(optA);
-
-    const optB = document.createElement('option');
-    optB.value = col.name;
-    optB.textContent = col.name;
-    selB.appendChild(optB);
-  });
-
-  if (currentA && state.numericColumns.some(c => c.name === currentA)) selA.value = currentA;
-  if (currentB && state.numericColumns.some(c => c.name === currentB)) selB.value = currentB;
+  if (currentA && state.numericColumns.some(c => c.name === currentA)) signalADropdown.setValue(currentA);
+  if (currentB && state.numericColumns.some(c => c.name === currentB)) signalBDropdown.setValue(currentB);
 
   updateComputeAutoName();
   updateComputeButton();
 }
 
 function updateComputeAutoName() {
-  const a = document.getElementById('computeSignalA').value;
-  const b = document.getElementById('computeSignalB').value;
+  const a = signalADropdown.getValue();
+  const b = signalBDropdown.getValue();
   const op = document.getElementById('computeOp').value;
   const nameInput = document.getElementById('computeResultName');
 
@@ -191,8 +611,8 @@ function updateComputeAutoName() {
 }
 
 function updateComputeButton() {
-  const a = document.getElementById('computeSignalA').value;
-  const b = document.getElementById('computeSignalB').value;
+  const a = signalADropdown.getValue();
+  const b = signalBDropdown.getValue();
   const name = document.getElementById('computeResultName').value.trim();
   const btn = document.getElementById('computeBtn');
   btn.disabled = !(a && b && name);
@@ -200,8 +620,8 @@ function updateComputeButton() {
 
 function enableComputeSection() {
   document.getElementById('computeSection').style.display = 'block';
-  document.getElementById('computeSignalA').disabled = false;
-  document.getElementById('computeSignalB').disabled = false;
+  signalADropdown.enable();
+  signalBDropdown.enable();
   document.getElementById('computeOp').disabled = false;
   document.getElementById('computeResultName').disabled = false;
   document.getElementById('computeBtn').disabled = true;
@@ -210,8 +630,8 @@ function enableComputeSection() {
 
 async function onComputeSignal() {
   const windowId = state.windowId;
-  const signalA = document.getElementById('computeSignalA').value;
-  const signalB = document.getElementById('computeSignalB').value;
+  const signalA = signalADropdown.getValue();
+  const signalB = signalBDropdown.getValue();
   const operation = document.getElementById('computeOp').value;
   let resultName = document.getElementById('computeResultName').value.trim();
 
@@ -238,7 +658,7 @@ async function onComputeSignal() {
       max: colInfo.max,
       sample_count: colInfo.sample_count,
     });
-    state.selectedYCols.add(colInfo.name);
+    state.selectedYCols.push(colInfo.name);
 
     populateComputeSelectors();
     renderSignalTags();
@@ -320,7 +740,7 @@ async function loadFile(path) {
       const inherited = urlParams.inheritColumns.split(',');
       inherited.forEach(name => {
         if (state.numericColumns.some(c => c.name === name)) {
-          state.selectedYCols.add(name);
+          addSelectedSignal(name);
         } else {
           showToast(`信号 "${name}" 在当前文件中不存在，已跳过`, 'info');
         }
@@ -330,13 +750,16 @@ async function loadFile(path) {
     }
 
     // 清除新文件中不存在的信号
-    const removed = [];
-    state.selectedYCols.forEach(name => {
-      if (!state.numericColumns.some(c => c.name === name)) {
-        state.selectedYCols.delete(name);
+    var removed = [];
+    var kept = [];
+    state.selectedYCols.forEach(function (name) {
+      if (state.numericColumns.some(function (c) { return c.name === name; })) {
+        kept.push(name);
+      } else {
         removed.push(name);
       }
     });
+    state.selectedYCols = kept;
     if (removed.length > 0) {
       renderSignalTags();
       updateGenerateButton();
@@ -359,13 +782,13 @@ async function loadFile(path) {
 
 // ===== 生成图表 =====
 async function generateChart() {
-  if (!state.selectedXCol || state.selectedYCols.size === 0) {
+  if (!state.selectedXCol || state.selectedYCols.length === 0) {
     showToast('请选择 X 轴和至少一个信号', 'error');
     return;
   }
 
-  if (state.selectedYCols.size > 20) {
-    showToast(`最多选择 20 个信号（当前 ${state.selectedYCols.size} 个）`, 'error');
+  if (state.selectedYCols.length > 20) {
+    showToast(`最多选择 20 个信号（当前 ${state.selectedYCols.length} 个）`, 'error');
     return;
   }
 
@@ -374,13 +797,14 @@ async function generateChart() {
   try {
     var data = await TauriBridge.getSeries(
       state.windowId,
-      Array.from(state.selectedYCols),
+      state.selectedYCols,
       null,
       null
     );
 
     // 保存当前数据供记号标记用
     window.__chartData = data;
+    window.__chartGroups = state.signalGroups.slice(); // 传合并组信息
     chartMarkers = [];
     updateClearMarkersBtn();
 
@@ -388,7 +812,7 @@ async function generateChart() {
     document.getElementById('chartContainer').style.display = 'block';
     document.getElementById('menuMarkerList').style.display = 'inline-block';
     document.getElementById('menuClearMarkers').style.display = 'none';
-    renderChart(data, chartMarkers);
+    renderChart(data, chartMarkers, window.__chartGroups);
     showToast('图表已生成', 'success');
     updateStatusBar();
   } catch (err) {
@@ -490,7 +914,7 @@ async function onNewWindow() {
     const selected = await invoke('pick_file');
     if (!selected) return;
 
-    const inheritCols = Array.from(state.selectedYCols).join(',');
+    const inheritCols = state.selectedYCols.join(',');
     const newWindowUrl = `index.html?file=${encodeURIComponent(selected)}&inherit=${encodeURIComponent(inheritCols)}&from=${state.windowId}`;
 
     await invoke('create_window', {
@@ -510,7 +934,7 @@ async function onNewWindow() {
 function updateStatusBar() {
   let left = '就绪';
   if (state.fileLoaded) {
-    left = `已选 ${state.selectedYCols.size} 个信号 | X轴: ${state.selectedXCol || '未选择'}`;
+    left = `已选 ${state.selectedYCols.length} 个信号 | X轴: ${state.selectedXCol || '未选择'}`;
     if (state.timeRange && state.selectedXCol) {
       left += ` | ${formatTimestamp(state.timeRange.start)} ~ ${formatTimestamp(state.timeRange.end)}`;
     }
@@ -563,14 +987,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 信号运算事件
   document.getElementById('computeBtn').addEventListener('click', onComputeSignal);
-  document.getElementById('computeSignalA').addEventListener('change', () => {
-    updateComputeAutoName();
-    updateComputeButton();
-  });
-  document.getElementById('computeSignalB').addEventListener('change', () => {
-    updateComputeAutoName();
-    updateComputeButton();
-  });
   document.getElementById('computeOp').addEventListener('change', updateComputeAutoName);
   document.getElementById('computeResultName').addEventListener('input', () => {
     document.getElementById('computeResultName').dataset.auto = 'false';

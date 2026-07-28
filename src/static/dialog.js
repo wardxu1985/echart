@@ -20,7 +20,7 @@ function renderSignalList(columns) {
   const list = document.getElementById('signalList');
   list.innerHTML = '';
   columns.forEach((col, idx) => {
-    const checked = state.selectedYCols.has(col.name);
+    const checked = hasSelectedSignal(col.name);
     const item = document.createElement('div');
     item.className = 'signal-item';
     item.innerHTML = `
@@ -31,9 +31,9 @@ function renderSignalList(columns) {
     `;
     item.querySelector('input').addEventListener('change', (e) => {
       if (e.target.checked) {
-        state.selectedYCols.add(col.name);
+        addSelectedSignal(col.name);
       } else {
-        state.selectedYCols.delete(col.name);
+        removeSelectedSignal(col.name);
       }
       updateDialogCount();
     });
@@ -53,7 +53,7 @@ function selectAllFiltered() {
   const checkboxes = document.querySelectorAll('#signalList input[type="checkbox"]');
   checkboxes.forEach(cb => {
     cb.checked = true;
-    state.selectedYCols.add(cb.value);
+    addSelectedSignal(cb.value);
   });
   updateDialogCount();
 }
@@ -62,7 +62,7 @@ function clearAllFiltered() {
   const checkboxes = document.querySelectorAll('#signalList input[type="checkbox"]');
   checkboxes.forEach(cb => {
     cb.checked = false;
-    state.selectedYCols.delete(cb.value);
+    removeSelectedSignal(cb.value);
   });
   updateDialogCount();
 }
@@ -76,5 +76,5 @@ function confirmSignalSelection() {
 
 function updateDialogCount() {
   document.getElementById('dialogCount').textContent =
-    `已选 ${state.selectedYCols.size} / ${state.numericColumns.length} 个信号`;
+    `已选 ${state.selectedYCols.length} / ${state.numericColumns.length} 个信号`;
 }

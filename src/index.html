@@ -50,16 +50,18 @@
       <div class="panel-section" id="computeSection" style="display:none;">
         <label class="section-title">信号运算</label>
         <div class="compute-row">
-          <select id="computeSignalA" class="compute-select" disabled>
-            <option value="">— 信号 A —</option>
-          </select>
+          <div class="searchable-dropdown" id="signalADropdown">
+            <input type="text" id="signalAInput" class="dropdown-input" placeholder="— 信号 A —" disabled>
+            <div class="dropdown-list" id="signalAList"></div>
+          </div>
           <select id="computeOp" class="compute-op" disabled>
             <option value="+">+</option>
             <option value="-">−</option>
           </select>
-          <select id="computeSignalB" class="compute-select" disabled>
-            <option value="">— 信号 B —</option>
-          </select>
+          <div class="searchable-dropdown" id="signalBDropdown">
+            <input type="text" id="signalBInput" class="dropdown-input" placeholder="— 信号 B —" disabled>
+            <div class="dropdown-list" id="signalBList"></div>
+          </div>
         </div>
         <div class="compute-row">
           <input type="text" id="computeResultName" class="compute-name" placeholder="结果名称" disabled>
