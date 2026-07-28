@@ -1023,6 +1023,11 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.key === 'Escape' && document.getElementById('signalDialogOverlay').style.display === 'flex') {
       closeSignalDialog();
     }
+    if (e.key === 'F12') {
+      e.preventDefault();
+      // 在 Windows 上按 F12 可以看到更底层的报错信息
+      invoke('log_error', { message: 'F12 调试: 当前 state=' + JSON.stringify({ fileLoaded: state.fileLoaded, windowId: state.windowId, cols: state.columns.length }) }).catch(function () {});
+    }
   });
 
   // 初始化图表占位
@@ -1040,17 +1045,23 @@ document.addEventListener('DOMContentLoaded', () => {
         await loadFile(pending.path, pending.inherit_from, pending.inherit_columns);
         return;
       }
-    } catch (_) {}
+    } catch (err) {
+      showToast('[pending_file] ' + err, 'error', 5000);
+      invoke('log_error', { message: '[pending_file] ' + String(err) }).catch(function () {});
+    }
     // 回退：从 URL 查询参数读取（Windows 兼容）
     try {
       const params = getUrlParams();
       if (params.filePath) {
-        // 修复编码：Tauri 的 IPC 已自动解码，但 URL 参数需要手动解码
         const filePath = decodeURIComponent(params.filePath);
         const inheritCols = params.inheritColumns ? decodeURIComponent(params.inheritColumns) : '';
         const inheritFrom = params.inheritFrom ? decodeURIComponent(params.inheritFrom) : '';
         await loadFile(filePath, inheritFrom || null, inheritCols || null);
+      } else {
+        showToast('没有待加载文件，请手动打开', 'info', 4000);
       }
-    } catch (_) {}
+    } catch (err) {
+      showToast('[URL回退] ' + err, 'error', 5000);
+    }
   })();
 });

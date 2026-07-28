@@ -292,6 +292,12 @@ pub fn get_version() -> String {
 }
 
 #[tauri::command]
+pub fn log_error(message: String) {
+    // 将前端错误同步打印到 Rust 控制台（Windows 上运行 exe 可见）
+    eprintln!("[JS Error] {}", message);
+}
+
+#[tauri::command]
 pub fn compute_signal(
     window_id: String,
     signal_a: String,
