@@ -237,12 +237,35 @@ pub fn create_window(
     let _ = url; // 保留参数向前兼容
     let window_id = uuid::Uuid::new_v4().to_string();
 
-    // Windows WebView2 子窗口用 App URL 可能无法加载，改用 about:blank + 导航
-    let webview_url = tauri::WebviewUrl::External(
-        tauri::Url::parse("about:blank").map_err(|_| "URL无效".to_string())?
-    );
+    // 用 file:// URL 绕过 Tauri asset protocol 在 Windows 子窗口的加载问题
+    let webview_url = if let Ok(r) = app.path().resource_dir() {
+        // 尝试构建 file:// URL：<resource_dir>/_up_/src/index.html
+        let candidates = [
+            r.join("_up_").join("src").join("index.html"),
+            r.join("src").join("index.html"),
+            r.join("index.html"),
+        ];
+        let mut found = None;
+        for c in &candidates {
+            if c.exists() {
+                found = Some(c.clone());
+                break;
+            }
+        }
+        if let Some(p) = found {
+            if let Ok(u) = tauri::Url::from_file_path(&p) {
+                tauri::WebviewUrl::External(u)
+            } else {
+                tauri::WebviewUrl::App(std::path::PathBuf::from("index.html"))
+            }
+        } else {
+            tauri::WebviewUrl::App(std::path::PathBuf::from("index.html"))
+        }
+    } else {
+        tauri::WebviewUrl::App(std::path::PathBuf::from("index.html"))
+    };
 
-    // 双通道存储待加载文件：Mutex + 文件系统（Windows 兼容）
+    // 双通道存储待加载文件
     if let Some(ref path) = file_path {
         let pending = PendingFileData {
             path: path.clone(),
@@ -267,10 +290,7 @@ pub fn create_window(
         .inner_size(width as f64, height as f64)
         .resizable(true);
 
-    let window = builder.build().map_err(|e| format!("创建窗口失败: {}", e))?;
-
-    // 导航到实际页面（绕过 Windows WebView2 子窗口 App URL 加载问题）
-    let _ = window.eval("window.location.replace('tauri://localhost/index.html')");
+    builder.build().map_err(|e| format!("创建窗口失败: {}", e))?;
 
     Ok(())
 }
