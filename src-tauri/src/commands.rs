@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, State};
-use crate::state::{AppState, ChartData, ColumnInfo, ColumnType, FileOpenResult, PendingFileData, SeriesData, TimeRange};
+use tauri::{AppHandle, Emitter, State};
+use crate::state::{AppState, ChartData, ColumnInfo, ColumnType, FileOpenResult, SeriesData, TimeRange};
 use crate::excel_reader::read_excel;
 use crate::csv_reader::read_csv;
 use crate::downsample::detect_gaps;
@@ -220,107 +220,7 @@ pub fn close_window(
     Ok(())
 }
 
-#[tauri::command]
-pub fn create_window(
-    app: AppHandle,
-    url: String,
-    title: String,
-    width: u32,
-    height: u32,
-    file_path: Option<String>,
-    inherit_from: Option<String>,
-    inherit_columns: Option<String>,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    use tauri::WebviewWindowBuilder;
 
-    let _ = url; // 保留参数向前兼容
-    let window_id = uuid::Uuid::new_v4().to_string();
-
-    // 用 file:// URL 绕过 Tauri asset protocol 在 Windows 子窗口的加载问题
-    let webview_url = if let Ok(r) = app.path().resource_dir() {
-        // 尝试构建 file:// URL：<resource_dir>/_up_/src/index.html
-        let candidates = [
-            r.join("_up_").join("src").join("index.html"),
-            r.join("src").join("index.html"),
-            r.join("index.html"),
-        ];
-        let mut found = None;
-        for c in &candidates {
-            if c.exists() {
-                found = Some(c.clone());
-                break;
-            }
-        }
-        if let Some(p) = found {
-            if let Ok(u) = tauri::Url::from_file_path(&p) {
-                tauri::WebviewUrl::External(u)
-            } else {
-                tauri::WebviewUrl::App(std::path::PathBuf::from("index.html"))
-            }
-        } else {
-            tauri::WebviewUrl::App(std::path::PathBuf::from("index.html"))
-        }
-    } else {
-        tauri::WebviewUrl::App(std::path::PathBuf::from("index.html"))
-    };
-
-    // 双通道存储待加载文件
-    if let Some(ref path) = file_path {
-        let pending = PendingFileData {
-            path: path.clone(),
-            inherit_from,
-            inherit_columns,
-        };
-        if let Ok(mut guard) = state.pending_file.lock() {
-            *guard = Some(pending.clone());
-        }
-        if let Ok(data_dir) = app.path().app_data_dir() {
-            if std::fs::create_dir_all(&data_dir).is_ok() {
-                let info_path = data_dir.join("pending_window.json");
-                if let Ok(json) = serde_json::to_string(&pending) {
-                    let _ = std::fs::write(&info_path, &json);
-                }
-            }
-        }
-    }
-
-    let builder = WebviewWindowBuilder::new(&app, &window_id, webview_url)
-        .title(&title)
-        .inner_size(width as f64, height as f64)
-        .resizable(true);
-
-    builder.build().map_err(|e| format!("创建窗口失败: {}", e))?;
-
-    Ok(())
-}
-
-#[tauri::command]
-pub fn get_pending_file(
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<Option<PendingFileData>, String> {
-    // 通道 1: Mutex
-    {
-        let mut pending = state.pending_file.lock().map_err(|e| e.to_string())?;
-        if pending.is_some() {
-            return Ok(pending.take());
-        }
-    }
-    // 通道 2: 文件系统回退（Windows WebView2 兼容）
-    if let Ok(data_dir) = app.path().app_data_dir() {
-        let info_path = data_dir.join("pending_window.json");
-        if info_path.exists() {
-            if let Ok(content) = std::fs::read_to_string(&info_path) {
-                let _ = std::fs::remove_file(&info_path);
-                if let Ok(pending) = serde_json::from_str(&content) {
-                    return Ok(Some(pending));
-                }
-            }
-        }
-    }
-    Ok(None)
-}
 
 #[tauri::command]
 pub async fn pick_file(app: AppHandle) -> Result<Option<String>, String> {
@@ -337,11 +237,6 @@ pub fn get_version() -> String {
     format!("v{} · wardxu", env!("CARGO_PKG_VERSION"))
 }
 
-#[tauri::command]
-pub fn log_error(message: String) {
-    // 将前端错误同步打印到 Rust 控制台（Windows 上运行 exe 可见）
-    eprintln!("[JS Error] {}", message);
-}
 
 #[tauri::command]
 pub fn compute_signal(

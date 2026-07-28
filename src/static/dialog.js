@@ -1,13 +1,13 @@
 // ===== 信号选择弹窗 =====
 
 function openSignalDialog() {
-  if (!state.fileLoaded) return;
+  if (!currentSession() || !currentSession().fileLoaded) return;
   const dialog = document.getElementById('signalDialogOverlay');
   const search = document.getElementById('signalSearch');
 
   search.value = '';
   dialog.style.display = 'flex';
-  renderSignalList(state.numericColumns);
+  renderSignalList(currentSession() ? currentSession().numericColumns : []);
   updateDialogCount();
   search.focus();
 }
@@ -42,9 +42,10 @@ function renderSignalList(columns) {
 }
 
 function onSignalSearch(keyword) {
-  const filtered = state.numericColumns.filter(col =>
-    col.name.toLowerCase().includes(keyword.toLowerCase())
-  );
+  var cols = currentSession() ? currentSession().numericColumns : [];
+  var filtered = cols.filter(function (col) {
+    return col.name.toLowerCase().includes(keyword.toLowerCase());
+  });
   renderSignalList(filtered);
   updateDialogCount();
 }
@@ -75,6 +76,8 @@ function confirmSignalSelection() {
 }
 
 function updateDialogCount() {
-  document.getElementById('dialogCount').textContent =
-    `已选 ${state.selectedYCols.length} / ${state.numericColumns.length} 个信号`;
+  var sess = currentSession();
+  var selected = sess ? sess.selectedYCols.length : 0;
+  var total = sess ? sess.numericColumns.length : 0;
+  document.getElementById('dialogCount').textContent = '已选 ' + selected + ' / ' + total + ' 个信号';
 }

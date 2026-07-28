@@ -30,59 +30,111 @@ var TauriBridge = {
   },
 };
 
-// ===== UI 状态 =====
-var state = {
-  windowId: '',
-  columns: [],
-  selectedXCol: null,
-  selectedYCols: [],  // 有序数组，顺序决定子图顺序
-  signalGroups: [],   // [{signals: ["rpm", "torque"]}] 表示合并到同一子图
-  rawColumns: [],
-  numericColumns: [],
-  fileLoaded: false,
-  timeRange: null,
-};
+// ===== UI 状态（多 Session 架构） =====
+var sessions = {};       // { [sessionId]: SessionState }
+var activeSessionId = null;
 
-// ===== 信号选择辅助函数 =====
+// 默认 Session 状态模板
+function defaultSession() {
+  return {
+    id: null,
+    windowId: '',
+    fileName: '',
+    columns: [],
+    selectedXCol: null,
+    selectedYCols: [],
+    signalGroups: [],
+    rawColumns: [],
+    numericColumns: [],
+    fileLoaded: false,
+    timeRange: null,
+    vin: null,
+    // 图表缓存
+    chartData: null,
+    chartMarkers: [],
+    dataZoom: { start: 0, end: 100 },
+  };
+}
+
+function currentSession() {
+  return sessions[activeSessionId] || null;
+}
+
+function createSession() {
+  var id = 'sess_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+  var sess = defaultSession();
+  sess.id = id;
+  sessions[id] = sess;
+  return sess;
+}
+
+function removeSession(id) {
+  var sess = sessions[id];
+  if (sess && sess.windowId) {
+    invoke('close_window', { windowId: sess.windowId }).catch(function () {});
+  }
+  delete sessions[id];
+}
+
+var _sessIdCounter = 0;
+
+function ensureTab() {
+  var ids = Object.keys(sessions);
+  if (ids.length === 0) {
+    var s = createSession();
+    activeSessionId = s.id;
+    renderTabBar();
+  }
+}
+
+// ===== 信号选择辅助函数（操作当前 Session） =====
 function addSelectedSignal(name) {
-  if (!state.selectedYCols.includes(name)) {
-    state.selectedYCols.push(name);
+  var sess = currentSession();
+  if (!sess) return;
+  if (!sess.selectedYCols.includes(name)) {
+    sess.selectedYCols.push(name);
   }
 }
 function removeSelectedSignal(name) {
-  // 先从合并组中移除
-  for (var i = 0; i < state.signalGroups.length; i++) {
-    var idx = state.signalGroups[i].signals.indexOf(name);
+  var sess = currentSession();
+  if (!sess) return;
+  for (var i = 0; i < sess.signalGroups.length; i++) {
+    var idx = sess.signalGroups[i].signals.indexOf(name);
     if (idx !== -1) {
-      state.signalGroups[i].signals.splice(idx, 1);
-      if (state.signalGroups[i].signals.length < 2) {
-        // 组内不足 2 个信号，解散该组
-        state.signalGroups.splice(i, 1);
+      sess.signalGroups[i].signals.splice(idx, 1);
+      if (sess.signalGroups[i].signals.length < 2) {
+        sess.signalGroups.splice(i, 1);
       }
       break;
     }
   }
-  // 再从平铺列表中移除
-  var idx = state.selectedYCols.indexOf(name);
-  if (idx !== -1) state.selectedYCols.splice(idx, 1);
+  var idx = sess.selectedYCols.indexOf(name);
+  if (idx !== -1) sess.selectedYCols.splice(idx, 1);
 }
 function hasSelectedSignal(name) {
-  return state.selectedYCols.includes(name);
+  var sess = currentSession();
+  return sess ? sess.selectedYCols.includes(name) : false;
 }
 function getSignalGroup(name) {
-  for (var i = 0; i < state.signalGroups.length; i++) {
-    if (state.signalGroups[i].signals.includes(name)) return state.signalGroups[i];
+  var sess = currentSession();
+  if (!sess) return null;
+  for (var i = 0; i < sess.signalGroups.length; i++) {
+    if (sess.signalGroups[i].signals.includes(name)) return sess.signalGroups[i];
   }
   return null;
 }
 function flatSelected() {
-  return state.selectedYCols;
+  var sess = currentSession();
+  var arr = [];
+  if (sess) arr = arr.concat(sess.selectedYCols);
+  return arr;
 }
 function subplotCount() {
-  // 合并组中的 N 个信号只占 1 个子图，其余每个信号占 1 个
+  var sess = currentSession();
+  if (!sess) return 0;
   var merged = 0;
-  state.signalGroups.forEach(function (g) { merged += g.signals.length - 1; });
-  return state.selectedYCols.length - merged;
+  sess.signalGroups.forEach(function (g) { merged += g.signals.length - 1; });
+  return sess.selectedYCols.length - merged;
 }
 
 // ===== 搜索式下拉框实例 =====
@@ -298,24 +350,158 @@ function populateXSelect(columns) {
 
   if (candidates.length > 0) {
     select.value = candidates[0].name;
-    state.selectedXCol = candidates[0].name;
+    currentSession().selectedXCol = candidates[0].name;
   }
 }
 
 function onXSelectChange() {
   const select = document.getElementById('xSelect');
-  state.selectedXCol = select.value || null;
+  currentSession().selectedXCol = select.value || null;
   updateGenerateButton();
   updateStatusBar();
+}
+
+// ===== Tab 栏 =====
+function renderTabBar() {
+  var bar = document.getElementById('tabBar');
+  if (!bar) return;
+  var ids = Object.keys(sessions);
+  var html = '';
+  ids.forEach(function (id) {
+    var s = sessions[id];
+    var isActive = id === activeSessionId;
+    var name = s.fileName || '未命名';
+    html += '<div class="tab' + (isActive ? ' active' : '') + '" data-session="' + id + '">' +
+      '<span class="tab-name">' + escapeHtml(name) + '</span>' +
+      (ids.length > 1 ? '<span class="tab-close" data-session="' + id + '">×</span>' : '') +
+      '</div>';
+  });
+  html += '<div class="tab-add" id="tabAddBtn">+</div>';
+  bar.innerHTML = html;
+
+  // Tab 点击切换
+  bar.querySelectorAll('.tab[data-session]').forEach(function (tab) {
+    tab.addEventListener('click', function (e) {
+      if (e.target.closest('.tab-close')) return;
+      switchSession(this.dataset.session);
+    });
+  });
+  // Tab 关闭
+  bar.querySelectorAll('.tab-close').forEach(function (btn) {
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      closeTab(this.dataset.session);
+    });
+  });
+  // Tab 添加
+  var addBtn = document.getElementById('tabAddBtn');
+  if (addBtn) {
+    addBtn.addEventListener('click', function () {
+      startNewTab();
+    });
+  }
+}
+
+function switchSession(id) {
+  if (id === activeSessionId || !sessions[id]) return;
+  // 保存当前 session 的缩放位置
+  var cur = currentSession();
+  if (cur && chart) {
+    try {
+      var opt = chart.getModel().getComponent('dataZoom', 0);
+      if (opt) {
+        cur.dataZoom = { start: opt.option.start, end: opt.option.end };
+      }
+    } catch (_) {}
+  }
+  activeSessionId = id;
+  updateUIForSession();
+  renderTabBar();
+}
+
+function closeTab(id) {
+  var ids = Object.keys(sessions);
+  if (ids.length <= 1) return;
+  var wasActive = id === activeSessionId;
+  removeSession(id);
+  if (wasActive) {
+    var remaining = Object.keys(sessions);
+    activeSessionId = remaining[remaining.length - 1];
+  }
+  updateUIForSession();
+  renderTabBar();
+}
+
+function startNewTab() {
+  // 先弹出文件选择器，选中后再创建 tab
+  invoke('pick_file').then(function (selected) {
+    if (!selected) return;
+    var cur = currentSession();
+    var inheritCols = cur ? cur.selectedYCols.slice() : [];
+    var sess = createSession();
+    if (inheritCols.length > 0) {
+      sess.selectedYCols = inheritCols.slice();
+    }
+    activeSessionId = sess.id;
+    loadFileIntoSession(sess.id, selected);
+  }).catch(function (err) {
+    showToast('打开文件失败: ' + err, 'error');
+  });
+}
+
+function updateUIForSession() {
+  var sess = currentSession();
+  if (!sess) return;
+  // 检查空状态
+  if (!sess.fileLoaded) {
+    document.getElementById('chartPlaceholder').style.display = 'flex';
+    document.getElementById('chartPlaceholder').innerHTML = '<p>📊 请打开 Excel 文件，选择信号后生成图表</p>';
+    document.getElementById('chartContainer').style.display = 'none';
+  }
+  populateXSelect(sess.columns);
+  renderSignalTags();
+  updateGenerateButton();
+  updateStatusBar();
+  // 如果缓存了图表数据，恢复渲染
+  if (sess.chartData) {
+    chartMarkers = sess.chartMarkers || [];
+    updateClearMarkersBtn();
+    document.getElementById('chartPlaceholder').style.display = 'none';
+    document.getElementById('chartContainer').style.display = 'block';
+    document.getElementById('menuMarkerList').style.display = 'inline-block';
+    renderChart(sess.chartData, chartMarkers, window.__chartGroups);
+    // 恢复 dataZoom
+    try {
+      if (sess.dataZoom && chart) {
+        chart.setOption({ dataZoom: [{ start: sess.dataZoom.start, end: sess.dataZoom.end }] });
+      }
+    } catch (_) {}
+  } else {
+    chartMarkers = [];
+    updateClearMarkersBtn();
+    document.getElementById('menuMarkerList').style.display = 'none';
+  }
+  // 信号运算区
+  if (sess.fileLoaded) {
+    enableComputeSection();
+  }
+}
+
+function loadFileIntoSession(sessionId, filePath) {
+  var sess = sessions[sessionId];
+  if (!sess) return;
+  var prevSessionId = activeSessionId;
+  activeSessionId = sessionId;
+  loadFile(filePath, null, null);
 }
 
 function renderSignalTags() {
   const container = document.getElementById('signalTags');
   const countEl = document.getElementById('signalCount');
   container.innerHTML = '';
-  var len = state.selectedYCols.length;
+  var len = currentSession().selectedYCols.length;
   var totalSignals = 0;
-  state.selectedYCols.forEach(function (name) {
+  currentSession().selectedYCols.forEach(function (name) {
     var group = getSignalGroup(name);
     if (group) {
       if (group.signals[0] === name) {
@@ -352,10 +538,10 @@ function renderTag(container, names, key, totalLen) {
     btn.addEventListener('click', function (e) {
       e.stopPropagation();
       var dir = this.dataset.dir;
-      var currIdx = state.selectedYCols.indexOf(key);
+      var currIdx = currentSession().selectedYCols.indexOf(key);
       if (dir === 'up' && currIdx > 0) {
         swapSignals(currIdx, currIdx - 1);
-      } else if (dir === 'dn' && currIdx < state.selectedYCols.length - 1) {
+      } else if (dir === 'dn' && currIdx < currentSession().selectedYCols.length - 1) {
         swapSignals(currIdx, currIdx + 1);
       }
       renderSignalTags();
@@ -413,14 +599,14 @@ function computeDropZone(tagEl, clientX) {
 }
 
 function swapSignals(i, j) {
-  var arr = state.selectedYCols;
+  var arr = currentSession().selectedYCols;
   var tmp = arr[i];
   arr[i] = arr[j];
   arr[j] = tmp;
 }
 
 function moveSignal(fromName, toName) {
-  var arr = state.selectedYCols;
+  var arr = currentSession().selectedYCols;
   var fromIdx = arr.indexOf(fromName);
   var toIdx = arr.indexOf(toName);
   if (fromIdx === -1 || toIdx === -1) return;
@@ -508,7 +694,7 @@ function onDragEnd(e) {
   if (zone === 'before' || zone === 'after') {
     // 调序：从合并组或单独信号移动到目标前/后
     // 先从原位置移除 fromNames 中所有信号
-    var flat = state.selectedYCols;
+    var flat = currentSession().selectedYCols;
     var removed = [];
     fromNames.forEach(function (n) {
       var idx = flat.indexOf(n);
@@ -530,24 +716,24 @@ function onDragEnd(e) {
     });
 
     // 拖出合并组后，检查原组是否需要解散
-    for (var gi = state.signalGroups.length - 1; gi >= 0; gi--) {
-      var g = state.signalGroups[gi];
+    for (var gi = currentSession().signalGroups.length - 1; gi >= 0; gi--) {
+      var g = currentSession().signalGroups[gi];
       for (var fi = 0; fi < fromNames.length; fi++) {
         var si = g.signals.indexOf(fromNames[fi]);
         if (si !== -1) g.signals.splice(si, 1);
       }
-      if (g.signals.length < 2) state.signalGroups.splice(gi, 1);
+      if (g.signals.length < 2) currentSession().signalGroups.splice(gi, 1);
     }
   } else if (zone === 'merge') {
     // 合并：不修改平铺列表 selectedYCols，只更新 signalGroups
     // 先将 fromNames 从原组中拆除
-    for (var gi = state.signalGroups.length - 1; gi >= 0; gi--) {
-      var g = state.signalGroups[gi];
+    for (var gi = currentSession().signalGroups.length - 1; gi >= 0; gi--) {
+      var g = currentSession().signalGroups[gi];
       for (var fi = 0; fi < fromNames.length; fi++) {
         var si = g.signals.indexOf(fromNames[fi]);
         if (si !== -1) g.signals.splice(si, 1);
       }
-      if (g.signals.length < 2) state.signalGroups.splice(gi, 1);
+      if (g.signals.length < 2) currentSession().signalGroups.splice(gi, 1);
     }
 
     // 找到目标信号所在的组，或创建新组
@@ -561,7 +747,7 @@ function onDragEnd(e) {
       fromNames.forEach(function (n) {
         if (n !== targetName && !newGroup.signals.includes(n)) newGroup.signals.push(n);
       });
-      state.signalGroups.push(newGroup);
+      currentSession().signalGroups.push(newGroup);
     }
   }
 
@@ -574,9 +760,9 @@ function onDragEnd(e) {
 function updateGenerateButton() {
   const btn = document.getElementById('generateBtn');
   btn.disabled = !(
-    state.fileLoaded &&
-    state.selectedXCol &&
-    state.selectedYCols.length > 0
+    currentSession().fileLoaded &&
+    currentSession().selectedXCol &&
+    currentSession().selectedYCols.length > 0
   );
 }
 
@@ -585,11 +771,11 @@ function populateComputeSelectors() {
   const currentA = signalADropdown.getValue();
   const currentB = signalBDropdown.getValue();
 
-  signalADropdown.populate(state.numericColumns);
-  signalBDropdown.populate(state.numericColumns);
+  signalADropdown.populate(currentSession().numericColumns);
+  signalBDropdown.populate(currentSession().numericColumns);
 
-  if (currentA && state.numericColumns.some(c => c.name === currentA)) signalADropdown.setValue(currentA);
-  if (currentB && state.numericColumns.some(c => c.name === currentB)) signalBDropdown.setValue(currentB);
+  if (currentA && currentSession().numericColumns.some(c => c.name === currentA)) signalADropdown.setValue(currentA);
+  if (currentB && currentSession().numericColumns.some(c => c.name === currentB)) signalBDropdown.setValue(currentB);
 
   updateComputeAutoName();
   updateComputeButton();
@@ -629,7 +815,7 @@ function enableComputeSection() {
 }
 
 async function onComputeSignal() {
-  const windowId = state.windowId;
+  const windowId = currentSession().windowId;
   const signalA = signalADropdown.getValue();
   const signalB = signalBDropdown.getValue();
   const operation = document.getElementById('computeOp').value;
@@ -651,14 +837,14 @@ async function onComputeSignal() {
       resultName,
     });
 
-    state.numericColumns.push({
+    currentSession().numericColumns.push({
       name: colInfo.name,
       col_type: 'Numeric',
       min: colInfo.min,
       max: colInfo.max,
       sample_count: colInfo.sample_count,
     });
-    state.selectedYCols.push(colInfo.name);
+    currentSession().selectedYCols.push(colInfo.name);
 
     populateComputeSelectors();
     renderSignalTags();
@@ -692,6 +878,8 @@ async function onOpenFile() {
 
 async function loadFile(path, inheritFrom, inheritColumns) {
   const fileName = path.split(/[/\\]/).pop();
+  var sess = currentSession();
+  if (sess) sess.fileName = fileName;
 
   const overlay = document.getElementById('loadingOverlay');
   document.getElementById('loadingText').textContent = `正在加载 ${fileName}…`;
@@ -706,12 +894,12 @@ async function loadFile(path, inheritFrom, inheritColumns) {
       return;
     }
 
-    state.windowId = result.window_id;
-    state.columns = result.columns;
-    state.rawColumns = result.columns.filter(c => c.col_type === 'Time');
-    state.numericColumns = result.columns.filter(c => c.col_type === 'Numeric');
-    state.fileLoaded = true;
-    state.timeRange = result.time_range || null;
+    currentSession().windowId = result.window_id;
+    currentSession().columns = result.columns;
+    currentSession().rawColumns = result.columns.filter(c => c.col_type === 'Time');
+    currentSession().numericColumns = result.columns.filter(c => c.col_type === 'Numeric');
+    currentSession().fileLoaded = true;
+    currentSession().timeRange = result.time_range || null;
 
     // 显示 VIN/车架号
     var vinBanner = document.getElementById('vinBanner');
@@ -723,7 +911,7 @@ async function loadFile(path, inheritFrom, inheritColumns) {
     }
 
     document.getElementById('fileLabel').textContent = `📁 ${fileName}`;
-    document.getElementById('menuNewWindow').style.display = 'inline-block';
+    renderTabBar();
     document.getElementById('selectSignalBtn').disabled = false;
     enableComputeSection();
 
@@ -737,7 +925,7 @@ async function loadFile(path, inheritFrom, inheritColumns) {
     if (inheritColumns) {
       const inherited = inheritColumns.split(',');
       inherited.forEach(name => {
-        if (state.numericColumns.some(c => c.name === name)) {
+        if (currentSession().numericColumns.some(c => c.name === name)) {
           addSelectedSignal(name);
         } else {
           showToast(`信号 "${name}" 在当前文件中不存在，已跳过`, 'info');
@@ -750,14 +938,14 @@ async function loadFile(path, inheritFrom, inheritColumns) {
     // 清除新文件中不存在的信号
     var removed = [];
     var kept = [];
-    state.selectedYCols.forEach(function (name) {
-      if (state.numericColumns.some(function (c) { return c.name === name; })) {
+    currentSession().selectedYCols.forEach(function (name) {
+      if (currentSession().numericColumns.some(function (c) { return c.name === name; })) {
         kept.push(name);
       } else {
         removed.push(name);
       }
     });
-    state.selectedYCols = kept;
+    currentSession().selectedYCols = kept;
     if (removed.length > 0) {
       renderSignalTags();
       updateGenerateButton();
@@ -780,13 +968,13 @@ async function loadFile(path, inheritFrom, inheritColumns) {
 
 // ===== 生成图表 =====
 async function generateChart() {
-  if (!state.selectedXCol || state.selectedYCols.length === 0) {
+  if (!currentSession().selectedXCol || currentSession().selectedYCols.length === 0) {
     showToast('请选择 X 轴和至少一个信号', 'error');
     return;
   }
 
-  if (state.selectedYCols.length > 20) {
-    showToast(`最多选择 20 个信号（当前 ${state.selectedYCols.length} 个）`, 'error');
+  if (currentSession().selectedYCols.length > 20) {
+    showToast(`最多选择 20 个信号（当前 ${currentSession().selectedYCols.length} 个）`, 'error');
     return;
   }
 
@@ -794,15 +982,20 @@ async function generateChart() {
 
   try {
     var data = await TauriBridge.getSeries(
-      state.windowId,
-      state.selectedYCols,
+      currentSession().windowId,
+      currentSession().selectedYCols,
       null,
       null
     );
 
-    // 保存当前数据供记号标记用
+    // 缓存到当前 session
+    var sess = currentSession();
+    if (sess) {
+      sess.chartData = data;
+      sess.chartMarkers = [];
+    }
     window.__chartData = data;
-    window.__chartGroups = state.signalGroups.slice(); // 传合并组信息
+    window.__chartGroups = sess ? sess.signalGroups.slice() : [];
     chartMarkers = [];
     updateClearMarkersBtn();
 
@@ -846,6 +1039,8 @@ function onChartClicked(isoTime) {
   });
 
   chartMarkers.push(marker);
+  var sess = currentSession();
+  if (sess) sess.chartMarkers = chartMarkers.slice();
   updateClearMarkersBtn();
   applyMarkers(window.__chartData, chartMarkers);
   showToast('已添加记号 M' + chartMarkers.length, 'success');
@@ -853,6 +1048,8 @@ function onChartClicked(isoTime) {
 
 function clearMarkers() {
   chartMarkers = [];
+  var sess = currentSession();
+  if (sess) sess.chartMarkers = [];
   updateClearMarkersBtn();
   if (window.__chartData) {
     applyMarkers(window.__chartData, chartMarkers);
@@ -905,39 +1102,13 @@ function showMarkerList() {
 function closeMarkerList() {
   document.getElementById('markerDialogOverlay').style.display = 'none';
 }
-
-// ===== 多窗口 =====
-async function onNewWindow() {
-  try {
-    const selected = await invoke('pick_file');
-    if (!selected) return;
-
-    const inheritCols = state.selectedYCols.join(',');
-
-    // 创建窗口（不传 URL 查询参数），通过 Rust 中转文件信息
-    await invoke('create_window', {
-      url: 'index.html',
-      title: '信号查看器',
-      width: 1400,
-      height: 900,
-      filePath: selected,
-      inheritFrom: state.windowId,
-      inheritColumns: inheritCols,
-    });
-
-    showToast('新窗口已创建', 'success');
-  } catch (err) {
-    showToast(`打开新窗口失败: ${err}`, 'error');
-  }
-}
-
 // ===== 状态栏 =====
 function updateStatusBar() {
   let left = '就绪';
-  if (state.fileLoaded) {
-    left = `已选 ${state.selectedYCols.length} 个信号 | X轴: ${state.selectedXCol || '未选择'}`;
-    if (state.timeRange && state.selectedXCol) {
-      left += ` | ${formatTimestamp(state.timeRange.start)} ~ ${formatTimestamp(state.timeRange.end)}`;
+  if (currentSession().fileLoaded) {
+    left = `已选 ${currentSession().selectedYCols.length} 个信号 | X轴: ${currentSession().selectedXCol || '未选择'}`;
+    if (currentSession().timeRange && currentSession().selectedXCol) {
+      left += ` | ${formatTimestamp(currentSession().timeRange.start)} ~ ${formatTimestamp(currentSession().timeRange.end)}`;
     }
   }
   document.getElementById('statusLeft').textContent = left;
@@ -945,7 +1116,7 @@ function updateStatusBar() {
 
 // ===== 空状态检查 =====
 function checkEmptyState() {
-  if (!state.fileLoaded) {
+  if (!currentSession().fileLoaded) {
     document.getElementById('chartPlaceholder').style.display = 'flex';
     document.getElementById('chartPlaceholder').innerHTML = '<p>📊 请打开 Excel 文件，选择信号后生成图表</p>';
     document.getElementById('chartContainer').style.display = 'none';
@@ -954,9 +1125,12 @@ function checkEmptyState() {
 
 // ===== 窗口关闭时清理 =====
 window.addEventListener('beforeunload', () => {
-  if (state.windowId) {
-    TauriBridge.closeWindow(state.windowId).catch(() => {});
-  }
+  Object.keys(sessions).forEach(function (id) {
+    var s = sessions[id];
+    if (s && s.windowId) {
+      TauriBridge.closeWindow(s.windowId).catch(function () {});
+    }
+  });
 });
 
 // ===== 初始化 =====
@@ -972,7 +1146,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 绑定按钮事件
   document.getElementById('menuOpenFile').addEventListener('click', onOpenFile);
-  document.getElementById('menuNewWindow').addEventListener('click', onNewWindow);
   document.getElementById('menuClearMarkers').addEventListener('click', clearMarkers);
   document.getElementById('menuMarkerList').addEventListener('click', showMarkerList);
   document.getElementById('markerDialogCloseBtn').addEventListener('click', closeMarkerList);
@@ -1025,30 +1198,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (e.key === 'F12') {
       e.preventDefault();
-      // 在 Windows 上按 F12 可以看到更底层的报错信息
-      invoke('log_error', { message: 'F12 调试: 当前 state=' + JSON.stringify({ fileLoaded: state.fileLoaded, windowId: state.windowId, cols: state.columns.length }) }).catch(function () {});
     }
   });
+
+  // 初始化第一个 Session
+  ensureTab();
+  updateUIForSession();
 
   // 初始化图表占位
   checkEmptyState();
   initChart();
   document.getElementById('chartContainer').style.display = 'none';
   document.getElementById('chartPlaceholder').style.display = 'flex';
-
-  // 检查是否有来自父窗口的待加载文件（新窗口打开时）
-  // 双通道：Mutex + 文件系统回退（Windows 兼容）
-  (async function checkPendingFile() {
-    try {
-      const pending = await invoke('get_pending_file');
-      if (pending && pending.path) {
-        await loadFile(pending.path, pending.inherit_from, pending.inherit_columns);
-        return;
-      }
-      showToast('新窗口已创建，请手动打开文件', 'info', 5000);
-    } catch (err) {
-      showToast('[错误] ' + err, 'error', 8000);
-      try { await invoke('log_error', { message: String(err) }); } catch (_) {}
-    }
-  })();
 });
