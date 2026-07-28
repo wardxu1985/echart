@@ -1032,13 +1032,24 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('chartPlaceholder').style.display = 'flex';
 
   // 检查是否有来自父窗口的待加载文件（新窗口打开时）
+  // 双通道：优先 Rust pending_file，回退到 URL 查询参数
   (async function checkPendingFile() {
     try {
       const pending = await invoke('get_pending_file');
       if (pending && pending.path) {
-        // 暂存继承信息，loadFile 内部会通过 urlParams 读取
-        // 改为通过 Rust 传递，避免 URL 查询参数
         await loadFile(pending.path, pending.inherit_from, pending.inherit_columns);
+        return;
+      }
+    } catch (_) {}
+    // 回退：从 URL 查询参数读取（Windows 兼容）
+    try {
+      const params = getUrlParams();
+      if (params.filePath) {
+        // 修复编码：Tauri 的 IPC 已自动解码，但 URL 参数需要手动解码
+        const filePath = decodeURIComponent(params.filePath);
+        const inheritCols = params.inheritColumns ? decodeURIComponent(params.inheritColumns) : '';
+        const inheritFrom = params.inheritFrom ? decodeURIComponent(params.inheritFrom) : '';
+        await loadFile(filePath, inheritFrom || null, inheritCols || null);
       }
     } catch (_) {}
   })();

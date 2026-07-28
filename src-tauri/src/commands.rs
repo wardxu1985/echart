@@ -236,9 +236,17 @@ pub fn create_window(
 
     let window_id = uuid::Uuid::new_v4().to_string();
 
-    // 去掉查询参数，只保留路径部分
-    let path_only = url.split('?').next().unwrap_or(&url).to_string();
-    let webview_url = tauri::WebviewUrl::App(std::path::PathBuf::from(path_only));
+    // 双通道传递：Rust pending_file（主通道）+ URL 查询参数（Windows 回退）
+    let webview_url = if let Some(ref path) = file_path {
+        let enc_path = urlencoding::encode(path);
+        let enc_inherit = urlencoding::encode(inherit_columns.as_deref().unwrap_or(""));
+        let enc_from = urlencoding::encode(inherit_from.as_deref().unwrap_or(""));
+        tauri::WebviewUrl::App(std::path::PathBuf::from(format!(
+            "index.html?file={}&inherit={}&from={}", enc_path, enc_inherit, enc_from
+        )))
+    } else {
+        tauri::WebviewUrl::App(std::path::PathBuf::from(&url))
+    };
 
     // 先存储待加载文件（确保新窗口启动时能读到）
     if let Some(ref path) = file_path {
