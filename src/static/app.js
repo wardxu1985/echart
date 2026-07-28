@@ -1037,7 +1037,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('chartPlaceholder').style.display = 'flex';
 
   // 检查是否有来自父窗口的待加载文件（新窗口打开时）
-  // 双通道：优先 Rust pending_file，回退到 URL 查询参数
+  // 双通道：Mutex + 文件系统回退（Windows 兼容）
   (async function checkPendingFile() {
     try {
       const pending = await invoke('get_pending_file');
@@ -1045,23 +1045,10 @@ document.addEventListener('DOMContentLoaded', () => {
         await loadFile(pending.path, pending.inherit_from, pending.inherit_columns);
         return;
       }
+      showToast('新窗口已创建，请手动打开文件', 'info', 5000);
     } catch (err) {
-      showToast('[pending_file] ' + err, 'error', 5000);
-      invoke('log_error', { message: '[pending_file] ' + String(err) }).catch(function () {});
-    }
-    // 回退：从 URL 查询参数读取（Windows 兼容）
-    try {
-      const params = getUrlParams();
-      if (params.filePath) {
-        const filePath = decodeURIComponent(params.filePath);
-        const inheritCols = params.inheritColumns ? decodeURIComponent(params.inheritColumns) : '';
-        const inheritFrom = params.inheritFrom ? decodeURIComponent(params.inheritFrom) : '';
-        await loadFile(filePath, inheritFrom || null, inheritCols || null);
-      } else {
-        showToast('没有待加载文件，请手动打开', 'info', 4000);
-      }
-    } catch (err) {
-      showToast('[URL回退] ' + err, 'error', 5000);
+      showToast('[错误] ' + err, 'error', 8000);
+      try { await invoke('log_error', { message: String(err) }); } catch (_) {}
     }
   })();
 });

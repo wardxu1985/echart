@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use crate::state::{AppState, ChartData, ColumnInfo, ColumnType, FileOpenResult, PendingFileData, SeriesData, TimeRange};
 use crate::excel_reader::read_excel;
 use crate::csv_reader::read_csv;
@@ -234,28 +234,32 @@ pub fn create_window(
 ) -> Result<(), String> {
     use tauri::WebviewWindowBuilder;
 
+    let _ = url; // 保留参数向前兼容，但不再拼接查询参数到 URL
     let window_id = uuid::Uuid::new_v4().to_string();
 
-    // 双通道传递：Rust pending_file（主通道）+ URL 查询参数（Windows 回退）
-    let webview_url = if let Some(ref path) = file_path {
-        let enc_path = urlencoding::encode(path);
-        let enc_inherit = urlencoding::encode(inherit_columns.as_deref().unwrap_or(""));
-        let enc_from = urlencoding::encode(inherit_from.as_deref().unwrap_or(""));
-        tauri::WebviewUrl::App(std::path::PathBuf::from(format!(
-            "index.html?file={}&inherit={}&from={}", enc_path, enc_inherit, enc_from
-        )))
-    } else {
-        tauri::WebviewUrl::App(std::path::PathBuf::from(&url))
-    };
+    // 不传 URL 查询参数（Windows WebView2 无法正确加载带参数的 App URL）
+    let webview_url = tauri::WebviewUrl::App(std::path::PathBuf::from("index.html"));
 
-    // 先存储待加载文件（确保新窗口启动时能读到）
+    // 双通道存储待加载文件：Mutex + 文件系统（Windows Mutex 跨 WebView 可能不可靠）
     if let Some(ref path) = file_path {
-        let mut pending = state.pending_file.lock().map_err(|e| e.to_string())?;
-        *pending = Some(PendingFileData {
+        let pending = PendingFileData {
             path: path.clone(),
             inherit_from,
             inherit_columns,
-        });
+        };
+        // 通道 1: Mutex（主通道，跨窗口共享）
+        if let Ok(mut guard) = state.pending_file.lock() {
+            *guard = Some(pending.clone());
+        }
+        // 通道 2: 文件系统（Windows 回退）
+        if let Ok(data_dir) = app.path().app_data_dir() {
+            if std::fs::create_dir_all(&data_dir).is_ok() {
+                let info_path = data_dir.join("pending_window.json");
+                if let Ok(json) = serde_json::to_string(&pending) {
+                    let _ = std::fs::write(&info_path, &json);
+                }
+            }
+        }
     }
 
     let builder = WebviewWindowBuilder::new(&app, &window_id, webview_url)
@@ -270,10 +274,29 @@ pub fn create_window(
 
 #[tauri::command]
 pub fn get_pending_file(
+    app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Option<PendingFileData>, String> {
-    let mut pending = state.pending_file.lock().map_err(|e| e.to_string())?;
-    Ok(pending.take())
+    // 通道 1: Mutex
+    {
+        let mut pending = state.pending_file.lock().map_err(|e| e.to_string())?;
+        if pending.is_some() {
+            return Ok(pending.take());
+        }
+    }
+    // 通道 2: 文件系统回退（Windows WebView2 兼容）
+    if let Ok(data_dir) = app.path().app_data_dir() {
+        let info_path = data_dir.join("pending_window.json");
+        if info_path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&info_path) {
+                let _ = std::fs::remove_file(&info_path);
+                if let Ok(pending) = serde_json::from_str(&content) {
+                    return Ok(Some(pending));
+                }
+            }
+        }
+    }
+    Ok(None)
 }
 
 #[tauri::command]
