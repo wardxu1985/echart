@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
-use crate::state::{AppState, ChartData, ColumnInfo, ColumnType, FileOpenResult, SeriesData, TimeRange};
+use crate::state::{AppState, ChartData, ColumnInfo, ColumnType, FileOpenResult, PendingFileData, SeriesData, TimeRange};
 use crate::excel_reader::read_excel;
 use crate::csv_reader::read_csv;
 use crate::downsample::detect_gaps;
@@ -227,33 +227,28 @@ pub fn create_window(
     title: String,
     width: u32,
     height: u32,
+    file_path: Option<String>,
+    inherit_from: Option<String>,
+    inherit_columns: Option<String>,
+    state: State<'_, AppState>,
 ) -> Result<(), String> {
     use tauri::WebviewWindowBuilder;
 
     let window_id = uuid::Uuid::new_v4().to_string();
 
-    // 将 URL 转为 WebviewUrl：http/https 用 External，其余用 App（相对路径或 tauri://）
-    let webview_url = if url.starts_with("http://") || url.starts_with("https://") {
-        tauri::WebviewUrl::External(
-            tauri::Url::parse(&url).map_err(|e| format!("URL解析失败: {}", e))?
-        )
-    } else {
-        // 对于 tauri:// 或相对路径，提取路径+查询参数，统一用 App 模式
-        let app_path = if url.starts_with("tauri://") {
-            tauri::Url::parse(&url)
-                .map(|p| {
-                    let path = p.path().trim_start_matches('/').to_string();
-                    match p.query() {
-                        Some(q) => format!("{}?{}", path, q),
-                        None => path,
-                    }
-                })
-                .unwrap_or(url)
-        } else {
-            url
-        };
-        tauri::WebviewUrl::App(std::path::PathBuf::from(app_path))
-    };
+    // 去掉查询参数，只保留路径部分
+    let path_only = url.split('?').next().unwrap_or(&url).to_string();
+    let webview_url = tauri::WebviewUrl::App(std::path::PathBuf::from(path_only));
+
+    // 先存储待加载文件（确保新窗口启动时能读到）
+    if let Some(ref path) = file_path {
+        let mut pending = state.pending_file.lock().map_err(|e| e.to_string())?;
+        *pending = Some(PendingFileData {
+            path: path.clone(),
+            inherit_from,
+            inherit_columns,
+        });
+    }
 
     let builder = WebviewWindowBuilder::new(&app, &window_id, webview_url)
         .title(&title)
@@ -261,7 +256,16 @@ pub fn create_window(
         .resizable(true);
 
     builder.build().map_err(|e| format!("创建窗口失败: {}", e))?;
+
     Ok(())
+}
+
+#[tauri::command]
+pub fn get_pending_file(
+    state: State<'_, AppState>,
+) -> Result<Option<PendingFileData>, String> {
+    let mut pending = state.pending_file.lock().map_err(|e| e.to_string())?;
+    Ok(pending.take())
 }
 
 #[tauri::command]

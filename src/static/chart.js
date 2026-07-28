@@ -137,6 +137,7 @@ function renderChart(chartData, markers, groups) {
       type: 'line',
       sampling: 'lttb',
       data: s.y.map(function (v, i) { return [xData[i], v]; }),
+      showSymbol: false,
       symbol: 'circle',
       symbolSize: 2.5,
       lineStyle: { width: 1.5 },

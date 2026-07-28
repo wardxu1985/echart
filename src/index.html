@@ -8,9 +8,9 @@
   <link rel="stylesheet" href="static/style.css?v=31">
   <style>
     @keyframes loadingBarShimmer {
-      0%   { width:8%;  opacity:0.5; transform:translateX(-100%); }
-      50%  { width:60%; opacity:1;   transform:translateX(20%); }
-      100% { width:8%;  opacity:0.5; transform:translateX(100%); }
+      0%   { width:8%;  opacity:0.5; }
+      50%  { width:60%; opacity:1;   }
+      100% { width:8%;  opacity:0.5; }
     }
   </style>
 </head>
@@ -84,7 +84,7 @@
   </div>
 
   <!-- 信号选择弹窗 -->
-  <div id="signalDialogOverlay" class="dialog-overlay" style="display:none;">
+  <div id="signalDialogOverlay" class="dialog-overlay">
     <div id="signalDialog" class="dialog">
       <div class="dialog-header">
         <h3>选择信号</h3>
@@ -107,16 +107,16 @@
   </div>
 
   <!-- 加载覆盖层 -->
-  <div id="loadingOverlay" style="display:none;">
+  <div id="loadingOverlay">
     <div class="loading-spinner"></div>
     <div class="loading-text" id="loadingText">正在加载文件…</div>
-    <div style="width:220px;height:6px;background:#d0d5dd;border-radius:3px;margin-top:16px;overflow:hidden;">
-      <div id="loadingBarFill" style="height:100%;background:#2b5fa8;border-radius:3px;width:30%;animation:loadingBarShimmer 1.4s ease-in-out infinite;"></div>
+    <div class="loading-bar-track">
+      <div id="loadingBarFill" class="loading-bar-fill"></div>
     </div>
   </div>
 
   <!-- 记号列表弹窗 -->
-  <div id="markerDialogOverlay" class="dialog-overlay" style="display:none;">
+  <div id="markerDialogOverlay" class="dialog-overlay">
     <div class="dialog" style="width:700px;max-width:95vw;">
       <div class="dialog-header">
         <h3>记号列表</h3>

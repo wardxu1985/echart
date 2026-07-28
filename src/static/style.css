@@ -464,13 +464,13 @@ html, body {
 
 /* ===== 弹窗 ===== */
 .dialog-overlay {
+  display: none;
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
   background: var(--color-overlay);
-  display: flex;
   align-items: center;
   justify-content: center;
   z-index: 1000;
@@ -610,14 +610,15 @@ html, body {
 }
 
 /* ===== 加载覆盖层 ===== */
+/* 默认隐藏，JS 在 loadFile() 时设为 display:flex */
 #loadingOverlay {
+  display: none;
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
   background: rgba(255, 255, 255, 0.88);
-  display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
@@ -661,9 +662,9 @@ html, body {
 }
 
 @keyframes loadingBarShimmer {
-  0%   { width: 8%;  opacity: 0.5; transform: translateX(-100%); }
-  50%  { width: 60%; opacity: 1;   transform: translateX(20%); }
-  100% { width: 8%;  opacity: 0.5; transform: translateX(100%); }
+  0%   { width: 8%;  opacity: 0.5; }
+  50%  { width: 60%; opacity: 1; }
+  100% { width: 8%;  opacity: 0.5; }
 }
 
 @keyframes spin {
