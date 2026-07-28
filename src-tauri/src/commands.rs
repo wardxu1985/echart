@@ -234,24 +234,24 @@ pub fn create_window(
 ) -> Result<(), String> {
     use tauri::WebviewWindowBuilder;
 
-    let _ = url; // 保留参数向前兼容，但不再拼接查询参数到 URL
+    let _ = url; // 保留参数向前兼容
     let window_id = uuid::Uuid::new_v4().to_string();
 
-    // 不传 URL 查询参数（Windows WebView2 无法正确加载带参数的 App URL）
-    let webview_url = tauri::WebviewUrl::App(std::path::PathBuf::from("index.html"));
+    // Windows WebView2 子窗口用 App URL 可能无法加载，改用 about:blank + 导航
+    let webview_url = tauri::WebviewUrl::External(
+        tauri::Url::parse("about:blank").map_err(|_| "URL无效".to_string())?
+    );
 
-    // 双通道存储待加载文件：Mutex + 文件系统（Windows Mutex 跨 WebView 可能不可靠）
+    // 双通道存储待加载文件：Mutex + 文件系统（Windows 兼容）
     if let Some(ref path) = file_path {
         let pending = PendingFileData {
             path: path.clone(),
             inherit_from,
             inherit_columns,
         };
-        // 通道 1: Mutex（主通道，跨窗口共享）
         if let Ok(mut guard) = state.pending_file.lock() {
             *guard = Some(pending.clone());
         }
-        // 通道 2: 文件系统（Windows 回退）
         if let Ok(data_dir) = app.path().app_data_dir() {
             if std::fs::create_dir_all(&data_dir).is_ok() {
                 let info_path = data_dir.join("pending_window.json");
@@ -267,7 +267,10 @@ pub fn create_window(
         .inner_size(width as f64, height as f64)
         .resizable(true);
 
-    builder.build().map_err(|e| format!("创建窗口失败: {}", e))?;
+    let window = builder.build().map_err(|e| format!("创建窗口失败: {}", e))?;
+
+    // 导航到实际页面（绕过 Windows WebView2 子窗口 App URL 加载问题）
+    let _ = window.eval("window.location.replace('tauri://localhost/index.html')");
 
     Ok(())
 }
