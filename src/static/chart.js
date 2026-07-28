@@ -185,13 +185,13 @@ function renderChart(chartData, markers, groups) {
         var time = params[0].axisValue;
         var d = new Date(time);
         var ts = String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0') + ':' + String(d.getSeconds()).padStart(2,'0');
-        var html = '<div style="font-size:11px;color:#5f6b7a;margin-bottom:3px;">' + ts + '</div>';
+        var html = '<div style="font-size:11px;color:#5f6b7a;margin-bottom:4px;">' + ts + '</div>';
         params.forEach(function (p) {
           if (p.value && p.value[1] != null) {
             var v = typeof p.value[1] === 'number' ? p.value[1].toFixed(2) : p.value[1];
-            html += '<div style="font-size:12px;line-height:1.5;display:flex;justify-content:space-between;gap:12px;">' +
-              '<span style="color:#1a1a2e;">' + p.marker + ' ' + p.seriesName + '</span>' +
-              '<span style="font-family:Consolas,monospace;color:#2b5fa8;font-weight:bold;">' + v + '</span></div>';
+            html += '<div style="font-size:12px;line-height:1.6;white-space:nowrap;">' +
+              p.marker + ' <span style="color:#1a1a2e;">' + p.seriesName + '</span>' +
+              ' <span style="font-family:Consolas,monospace;color:#2b5fa8;font-weight:bold;float:right;margin-left:16px;">' + v + '</span></div>';
           }
         });
         return html;

@@ -464,11 +464,15 @@ function updateUIForSession() {
   updateStatusBar();
   // 如果缓存了图表数据，恢复渲染
   if (sess.chartData) {
+    // 更新全局引用
+    window.__chartData = sess.chartData;
+    window.__chartGroups = sess.signalGroups.slice();
     chartMarkers = sess.chartMarkers || [];
     updateClearMarkersBtn();
     document.getElementById('chartPlaceholder').style.display = 'none';
     document.getElementById('chartContainer').style.display = 'block';
     document.getElementById('menuMarkerList').style.display = 'inline-block';
+    document.getElementById('menuClearMarkers').style.display = chartMarkers.length > 0 ? 'inline-block' : 'none';
     renderChart(sess.chartData, chartMarkers, window.__chartGroups);
     // 恢复 dataZoom
     try {
