@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
-use crate::state::{AppState, ChartData, ColumnInfo, ColumnType, FileOpenResult, SeriesData, TimeRange};
+use crate::state::{AppState, ChartData, ColumnInfo, ColumnType, FileOpenResult, GroupColumnInfo, RtmSnapshot, RtmTimeEntry, SeriesData, TimeRange};
 use crate::excel_reader::read_excel;
 use crate::csv_reader::read_csv;
+use crate::column_parser::parse_timestamp_string;
 use crate::downsample::detect_gaps;
 
 const MAX_SERIES: usize = 20;
@@ -30,7 +31,7 @@ pub async fn open_file(
     let path_for_blocking = path.clone();
 
     // 将重型文件 IO 放到独立阻塞线程，避免卡死主线程和前端
-    let (data, columns, row_count, vin) = tauri::async_runtime::spawn_blocking(move || {
+    let (data, columns, row_count, vin, raw_grouped_data, time_raw_strings) = tauri::async_runtime::spawn_blocking(move || {
         let _ = app_for_blocking.emit("loading-progress", ProgressPayload { percent: 10, message: "正在读取文件…" });
 
         let result = if path_for_blocking.to_lowercase().ends_with(".csv") {
@@ -53,6 +54,8 @@ pub async fn open_file(
     let window_state = crate::state::WindowState {
         raw_data: data,
         columns: columns.clone(),
+        raw_grouped_data,
+        time_raw_strings,
     };
 
     // 插入到全局状态
@@ -235,6 +238,160 @@ pub async fn pick_file(app: AppHandle) -> Result<Option<String>, String> {
 #[tauri::command]
 pub fn get_version() -> String {
     format!("v{} · wardxu", env!("CARGO_PKG_VERSION"))
+}
+
+// ===== RTM 数据分析命令 =====
+
+#[tauri::command]
+pub fn rtm_list_group_columns(
+    window_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<GroupColumnInfo>, String> {
+    let windows = state.windows.lock().map_err(|e| e.to_string())?;
+    let window = windows.get(&window_id)
+        .ok_or_else(|| format!("窗口 {} 不存在", window_id))?;
+
+    let mut result: Vec<GroupColumnInfo> = Vec::new();
+    for (name, values) in &window.raw_grouped_data {
+        let sample_count = values.len();
+        // 计算元素个数（取第一个有逗号的行）
+        let element_count = values.iter()
+            .find(|v| v.contains(','))
+            .map(|v| v.split(',').count())
+            .unwrap_or(0);
+        result.push(GroupColumnInfo {
+            name: name.clone(),
+            element_count,
+            sample_count,
+        });
+    }
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn rtm_get_time_list(
+    window_id: String,
+    column: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<RtmTimeEntry>, String> {
+    let windows = state.windows.lock().map_err(|e| e.to_string())?;
+    let window = windows.get(&window_id)
+        .ok_or_else(|| format!("窗口 {} 不存在", window_id))?;
+
+    let grouped_values = window.raw_grouped_data.get(&column)
+        .ok_or_else(|| format!("列 \"{}\" 不是组数据列", column))?;
+
+    let time_strings = &window.time_raw_strings;
+    if time_strings.is_empty() {
+        return Err("未找到时间列数据".to_string());
+    }
+
+    let mut entries: Vec<RtmTimeEntry> = Vec::with_capacity(grouped_values.len());
+
+    for i in 0..grouped_values.len() {
+        let time_str = if i < time_strings.len() { &time_strings[i] } else { "" };
+        let val_str = &grouped_values[i];
+
+        // 拆分逗号分隔的值
+        let parts: Vec<f64> = val_str.split(',')
+            .filter_map(|p| {
+                let trimmed = p.trim().trim_end_matches(|c: char| !c.is_ascii_digit() && c != '.');
+                trimmed.parse::<f64>().ok()
+            })
+            .collect();
+
+        if parts.is_empty() {
+            continue;
+        }
+
+        let max_val = parts.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let min_val = parts.iter().cloned().fold(f64::INFINITY, f64::min);
+        let avg_val = parts.iter().sum::<f64>() / parts.len() as f64;
+
+        // 计算时间戳
+        let ts = parse_timestamp_string(time_str).unwrap_or(0.0);
+
+        entries.push(RtmTimeEntry {
+            time_str: time_str.to_string(),
+            timestamp: ts,
+            max_val,
+            min_val,
+            avg_val,
+            element_count: parts.len(),
+        });
+    }
+
+    Ok(entries)
+}
+
+#[tauri::command]
+pub fn rtm_get_snapshot(
+    window_id: String,
+    column: String,
+    time_str: String,
+    state: State<'_, AppState>,
+) -> Result<RtmSnapshot, String> {
+    let windows = state.windows.lock().map_err(|e| e.to_string())?;
+    let window = windows.get(&window_id)
+        .ok_or_else(|| format!("窗口 {} 不存在", window_id))?;
+
+    let grouped_values = window.raw_grouped_data.get(&column)
+        .ok_or_else(|| format!("列 \"{}\" 不是组数据列", column))?;
+
+    let time_strings = &window.time_raw_strings;
+
+    // 找到匹配的时间行
+    let idx = if let Some(ts) = parse_timestamp_string(&time_str) {
+        // 按时间戳匹配（查找最接近的行）
+        let mut best_idx = 0;
+        let mut best_dist = f64::INFINITY;
+        for i in 0..time_strings.len() {
+            if let Some(row_ts) = parse_timestamp_string(&time_strings[i]) {
+                let dist = (row_ts - ts).abs();
+                if dist < best_dist {
+                    best_dist = dist;
+                    best_idx = i;
+                }
+            }
+        }
+        best_idx
+    } else {
+        // 按字符串匹配
+        time_strings.iter().position(|t| t == &time_str)
+            .ok_or_else(|| format!("未找到时间 \"{}\"", time_str))?
+    };
+
+    if idx >= grouped_values.len() {
+        return Err("索引超出数据范围".to_string());
+    }
+
+    let val_str = &grouped_values[idx];
+    let parts: Vec<f64> = val_str.split(',')
+        .filter_map(|p| {
+            let trimmed = p.trim().trim_end_matches(|c: char| !c.is_ascii_digit() && c != '.');
+            trimmed.parse::<f64>().ok()
+        })
+        .collect();
+
+    if parts.is_empty() {
+        return Err("该时刻无有效数据".to_string());
+    }
+
+    let max_val = parts.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let min_val = parts.iter().cloned().fold(f64::INFINITY, f64::min);
+    let avg_val = parts.iter().sum::<f64>() / parts.len() as f64;
+    let max_index = parts.iter().position(|&v| (v - max_val).abs() < f64::EPSILON).unwrap_or(0);
+    let min_index = parts.iter().position(|&v| (v - min_val).abs() < f64::EPSILON).unwrap_or(0);
+
+    Ok(RtmSnapshot {
+        values: parts.clone(),
+        max_val,
+        min_val,
+        avg_val,
+        max_index,
+        min_index,
+        element_count: parts.len(),
+    })
 }
 
 

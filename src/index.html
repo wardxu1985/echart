@@ -20,6 +20,7 @@
     <div class="menu-item" id="menuOpenFile">📂 打开文件</div>
     <div class="menu-item" id="menuMarkerList" style="display:none;">📍 记号列表</div>
     <div class="menu-item" id="menuClearMarkers" style="display:none;">🗑 清空记号</div>
+    <div class="menu-item" id="menuRtmAnalysis">📊 RTM分析</div>
     <span class="menu-version" id="menuVersion">v0.1.0 · wardxu</span>
   </div>
 
@@ -133,6 +134,85 @@
     </div>
   </div>
 
+  <!-- ===== RTM 分析弹窗 ===== -->
+  <div id="rtmDialogOverlay" class="dialog-overlay">
+    <div id="rtmDialog" class="dialog rtm-dialog">
+      <div class="dialog-header">
+        <h3>📊 RTM分析</h3>
+        <div class="rtm-col-select">
+          <select id="rtmGroupColSelect" style="font-size:13px;padding:3px 8px;border:1px solid var(--color-border);border-radius:4px;">
+            <option>— 选择数据列 —</option>
+          </select>
+        </div>
+        <span class="dialog-close" id="rtmDialogCloseBtn">✕</span>
+      </div>
+      <div class="dialog-body rtm-body">
+        <div class="rtm-left">
+          <!-- 选择方式 -->
+          <div class="rtm-select-mode">
+            <div class="rtm-mode-section">
+              <label class="rtm-mode-label">▸ 从记号点选择</label>
+              <select id="rtmMarkerSelect" class="rtm-select">
+                <option value="">— 选择记号 —</option>
+              </select>
+            </div>
+            <div class="rtm-mode-section">
+              <label class="rtm-mode-label">▸ 选择时间点</label>
+              <input type="datetime-local" id="rtmDatetimePicker" class="rtm-datetime">
+            </div>
+            <div class="rtm-mode-section">
+              <label class="rtm-mode-label">▸ 从时间列表选择</label>
+              <button id="rtmOpenTimeListBtn" class="rtm-btn">📋 打开时间列表</button>
+            </div>
+          </div>
+        </div>
+        <div class="rtm-right">
+          <div class="rtm-stats-row">
+            <div id="rtmStats" class="rtm-stats">
+              <span>最高: <strong id="rtmStatMax">—</strong></span>
+              <span>最低: <strong id="rtmStatMin">—</strong></span>
+              <span>平均: <strong id="rtmStatAvg">—</strong></span>
+              <span>个数: <strong id="rtmStatCount">—</strong></span>
+            </div>
+            <button id="rtmClearRtmMarkers" class="rtm-btn-small" title="清空在RTM图表上点击添加的记号">🗑 清空标记</button>
+          </div>
+          <div id="rtmChartContainer" class="rtm-chart-box"></div>
+          <div id="rtmNoData" class="rtm-nodata">请选择数据分析列和时间点</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 时间列表弹窗（搜索/排序） ===== -->
+  <div id="rtmTimeListOverlay" class="dialog-overlay">
+    <div class="dialog" style="width:80vw;max-width:1000px;max-height:80vh;">
+      <div class="dialog-header">
+        <h3>选择时间点</h3>
+        <span class="dialog-close" id="rtmTimeListCloseBtn">✕</span>
+      </div>
+      <div class="dialog-body" style="padding:12px 20px;">
+        <div style="margin-bottom:8px;">
+          <input type="text" id="rtmTimeSearch" placeholder="搜索时间... (如输入 20:58 过滤)" style="width:300px;padding:6px 10px;border:1px solid var(--color-border);border-radius:4px;font-size:13px;outline:none;">
+        </div>
+        <div style="max-height:55vh;overflow:auto;">
+          <table id="rtmTimeTable" class="rtm-time-table">
+            <thead>
+              <tr>
+                <th data-sort="time" class="sortable">时间 <span class="sort-arrow"></span></th>
+                <th data-sort="max" class="sortable">最高(V) <span class="sort-arrow"></span></th>
+                <th data-sort="min" class="sortable">最低(V) <span class="sort-arrow"></span></th>
+                <th data-sort="avg" class="sortable">平均(V) <span class="sort-arrow"></span></th>
+                <th>记号</th>
+              </tr>
+            </thead>
+            <tbody id="rtmTimeTableBody"></tbody>
+          </table>
+        </div>
+        <div id="rtmTimeCount" style="text-align:right;font-size:11px;color:var(--color-text-tertiary);margin-top:4px;"></div>
+      </div>
+    </div>
+  </div>
+
   <!-- Toast 容器 -->
   <div id="toastContainer"></div>
 
@@ -147,6 +227,7 @@
   <script src="static/echarts.min.js"></script>
   <script src="static/dialog.js?v=31"></script>
   <script src="static/chart.js?v=31"></script>
+  <script src="static/rtm.js?v=31"></script>
   <script src="static/app.js?v=31"></script>
 </body>
 </html>

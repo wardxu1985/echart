@@ -161,6 +161,50 @@ pub fn parse_columns(
     (data, columns)
 }
 
+/// 检测逗号分隔的组数据列（如"单体电池电压-1"）
+/// 条件：> 50% 的非空值包含逗号，且逗号分隔的各部分均为数字
+pub fn find_grouped_columns(
+    header: &[String],
+    raw_cols: &[Vec<String>],
+) -> Vec<(String, Vec<String>, usize)> {
+    let mut result = Vec::new();
+
+    for (i, name) in header.iter().enumerate() {
+        if name.trim().is_empty() {
+            continue;
+        }
+        let values = &raw_cols[i];
+        if values.is_empty() {
+            continue;
+        }
+
+        // 检查是否包含逗号
+        let comma_count = values.iter().filter(|v| v.contains(',')).count();
+        if comma_count as f64 / (values.len() as f64) < 0.5 {
+            continue;
+        }
+
+        // 取第一行统计元素个数
+        let first = values.iter().find(|v| v.contains(','));
+        if let Some(first_val) = first {
+            let parts: Vec<&str> = first_val.split(',').collect();
+            let element_count = parts.len();
+
+            // 检查所有逗号分隔部分的格式
+            let all_numeric = parts.iter().all(|p| {
+                let trimmed = p.trim().trim_end_matches(|c: char| !c.is_ascii_digit() && c != '.');
+                trimmed.parse::<f64>().is_ok()
+            });
+
+            if all_numeric && element_count > 1 {
+                result.push((name.clone(), values.clone(), element_count));
+            }
+        }
+    }
+
+    result
+}
+
 /// 扫描表头和原始数据，查找车架号/VIN 列并返回第一个有效值
 const VIN_KEYWORDS: &[&str] = &["vin", "车架号", "底盘号", "底盘", "车辆识别"];
 
@@ -237,15 +281,138 @@ mod tests {
     #[test]
     fn test_parse_columns_skip_empty_and_non_numeric() {
         let header = vec!["".into(), "notes".into(), "value".into()];
-        // raw_cols is column-major: raw_cols[i] = all row values for header[i]
         let raw: Vec<Vec<String>> = vec![
-            vec!["x".into(), "y".into()],        // column 0 (empty name)
-            vec!["hello".into(), "world".into()], // column 1 (non-numeric)
-            vec!["10".into(), "20".into()],       // column 2 (numeric)
+            vec!["x".into(), "y".into()],
+            vec!["hello".into(), "world".into()],
+            vec!["10".into(), "20".into()],
         ];
         let (_data, cols) = parse_columns(&header, &raw);
-        assert_eq!(cols[0].col_type, ColumnType::Skip); // empty name
-        assert_eq!(cols[1].col_type, ColumnType::Skip); // non-numeric
+        assert_eq!(cols[0].col_type, ColumnType::Skip);
+        assert_eq!(cols[1].col_type, ColumnType::Skip);
         assert_eq!(cols[2].col_type, ColumnType::Numeric);
+    }
+
+    #[test]
+    fn test_find_grouped_columns_identifies_comma_separated() {
+        let header = vec!["采集时间".into(), "单体电池电压-1".into()];
+        let raw = vec![
+            vec!["2026-07-22 20:59:10".into(), "2026-07-22 20:59:00".into()],
+            vec![
+                "3.654,3.655,3.656".into(),
+                "3.651,3.652,3.653".into(),
+            ],
+        ];
+        let result = find_grouped_columns(&header, &raw);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].0, "单体电池电压-1");
+        assert_eq!(result[0].2, 3); // 3 elements per row
+    }
+
+    #[test]
+    fn test_find_grouped_columns_skips_normal_columns() {
+        let header = vec!["采集时间".into(), "车速".into()];
+        let raw = vec![
+            vec!["2026-07-22 20:59:10".into(), "2026-07-22 20:59:00".into()],
+            vec!["10.5".into(), "20.3".into()],
+        ];
+        let result = find_grouped_columns(&header, &raw);
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_find_grouped_columns_handles_unit_suffix() {
+        // Values with "V" suffix like "3.656V"
+        let header = vec!["采集时间".into(), "单体电池电压-1".into()];
+        let raw = vec![
+            vec!["2026-07-22 20:59:10".into()],
+            vec!["3.654,3.655,3.656V".into()],
+        ];
+        let result = find_grouped_columns(&header, &raw);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].2, 3);
+    }
+
+    #[test]
+    fn test_find_grouped_columns_from_real_file() {
+        // Test against the actual Excel file
+        use calamine::{open_workbook, Reader, Xlsx};
+
+        let path = std::path::Path::new("/Users/ward/Desktop/claude/车辆历史状态监控数据 (16).xlsx");
+        if !path.exists() {
+            eprintln!("Excel file not found at {:?}, skipping real file test", path);
+            return;
+        }
+
+        let mut workbook: Xlsx<_> = open_workbook(&path)
+            .expect("Failed to open Excel file");
+        let sheet_name = workbook.sheet_names().first().unwrap().clone();
+        let range = workbook.worksheet_range(&sheet_name).expect("Failed to read sheet");
+
+        let mut rows_iter = range.rows();
+        let header: Vec<String> = rows_iter.next().unwrap()
+            .iter().map(|c| c.to_string()).collect();
+
+        let col_count = header.len();
+        let mut raw_cols: Vec<Vec<String>> = vec![Vec::new(); col_count];
+        for row in rows_iter {
+            for (i, cell) in row.iter().enumerate() {
+                if i < col_count {
+                    raw_cols[i].push(cell.to_string());
+                }
+            }
+        }
+
+        let grouped = find_grouped_columns(&header, &raw_cols);
+        assert!(!grouped.is_empty(), "Expected at least one grouped column");
+
+        for (name, values, element_count) in &grouped {
+            println!("  Grouped column: {} ({} elements, {} samples)", name, element_count, values.len());
+        }
+
+        // Check for 单体电池电压-1
+        let has_bt = grouped.iter().any(|(n, _, _)| n.contains("单体电池电压"));
+        assert!(has_bt, "Expected 单体电池电压-1 column");
+
+        // Verify first grouped column has the right format
+        let (_name, values, element_count) = &grouped[0];
+        assert!(*element_count > 50, "Expected >50 elements, got {}", element_count);
+
+        // Parse one row
+        let first = values.iter().find(|v| v.contains(',')).unwrap();
+        let parts: Vec<f64> = first.split(',')
+            .filter_map(|p| {
+                let trimmed = p.trim().trim_end_matches(|c: char| !c.is_ascii_digit() && c != '.');
+                trimmed.parse::<f64>().ok()
+            })
+            .collect();
+        assert_eq!(parts.len(), *element_count);
+        println!("  First row parsed {} values: min={:.4}, max={:.4}",
+            parts.len(),
+            parts.iter().cloned().fold(f64::INFINITY, f64::min),
+            parts.iter().cloned().fold(f64::NEG_INFINITY, f64::max));
+    }
+
+    #[test]
+    fn test_rtm_snapshot_parsing() {
+        // Simulate a grouped column value as it comes from the Excel
+        let raw_value = "3.654,3.655,3.656,3.657,3.658V";
+        let parts: Vec<f64> = raw_value.split(',')
+            .filter_map(|p| {
+                let trimmed = p.trim().trim_end_matches(|c: char| !c.is_ascii_digit() && c != '.');
+                trimmed.parse::<f64>().ok()
+            })
+            .collect();
+
+        assert_eq!(parts.len(), 5);
+        assert!((parts[0] - 3.654).abs() < 0.001);
+        assert!((parts[4] - 3.658).abs() < 0.001);
+
+        let max_val = parts.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let min_val = parts.iter().cloned().fold(f64::INFINITY, f64::min);
+        let avg_val = parts.iter().sum::<f64>() / parts.len() as f64;
+
+        assert!((max_val - 3.658).abs() < 0.001);
+        assert!((min_val - 3.654).abs() < 0.001);
+        assert!((avg_val - 3.656).abs() < 0.001);
     }
 }

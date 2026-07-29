@@ -2,3 +2,5 @@ target/
 .DS_Store
 node_modules/
 test_*.csv
+*.xlsx
+*.csv

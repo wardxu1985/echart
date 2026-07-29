@@ -815,6 +815,262 @@ html, body {
   color: var(--color-text-secondary);
 }
 
+/* ===== RTM 分析弹窗 ===== */
+.rtm-dialog {
+  width: 90vw;
+  max-width: 1200px;
+  height: 80vh;
+  max-height: 800px;
+  display: flex;
+  flex-direction: column;
+}
+
+.rtm-dialog .dialog-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.rtm-dialog .dialog-header h3 {
+  flex-shrink: 0;
+}
+
+.rtm-col-select {
+  flex: 1;
+  min-width: 0;
+}
+
+.rtm-col-select select {
+  width: 100%;
+  max-width: 320px;
+}
+
+.rtm-body {
+  display: flex;
+  flex: 1;
+  gap: 16px;
+  padding: 16px 20px;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.rtm-left {
+  width: 280px;
+  flex-shrink: 0;
+  overflow-y: auto;
+}
+
+.rtm-right {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.rtm-select-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.rtm-mode-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rtm-mode-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.rtm-select {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--color-text);
+  background: var(--color-bg);
+  outline: none;
+}
+
+.rtm-select:focus {
+  border-color: var(--color-accent);
+}
+
+.rtm-datetime {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--color-text);
+  background: var(--color-bg);
+  outline: none;
+}
+
+.rtm-datetime:focus {
+  border-color: var(--color-accent);
+}
+
+.rtm-btn {
+  width: 100%;
+  padding: 7px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-accent);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.15s;
+}
+
+.rtm-btn:hover {
+  background: var(--color-accent-fill);
+  border-color: var(--color-accent);
+}
+
+.rtm-stats-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  margin-bottom: 8px;
+}
+
+.rtm-stats {
+  flex: 1;
+  display: flex;
+  gap: 20px;
+  padding: 10px 14px;
+  background: var(--color-bg-panel);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  flex-wrap: wrap;
+}
+
+.rtm-btn-small {
+  padding: 6px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+
+.rtm-btn-small:hover {
+  background: var(--color-accent-fill);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.rtm-stats strong {
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  margin-left: 4px;
+}
+
+.rtm-chart-box {
+  flex: 1;
+  min-height: 200px;
+}
+
+.rtm-nodata {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-tertiary);
+  font-size: 15px;
+}
+
+/* ===== 时间列表表格 ===== */
+.rtm-time-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.rtm-time-table th {
+  padding: 6px 10px;
+  border-bottom: 2px solid var(--color-border);
+  text-align: left;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  background: var(--color-bg-panel);
+  position: sticky;
+  top: 0;
+}
+
+.rtm-time-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.rtm-time-table th.sortable:hover {
+  background: var(--color-bg-hover);
+}
+
+.sort-arrow {
+  display: inline-block;
+  margin-left: 4px;
+  color: var(--color-text-tertiary);
+}
+
+th.sort-asc .sort-arrow::after { content: ' ▲'; color: var(--color-accent); }
+th.sort-desc .sort-arrow::after { content: ' ▼'; color: var(--color-accent); }
+
+.rtm-time-table td {
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--color-border-light);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+}
+
+.rtm-time-table td:first-child {
+  font-family: var(--font-ui);
+}
+
+.rtm-time-table tr:hover {
+  background: var(--color-bg-hover);
+  cursor: pointer;
+}
+
+.rtm-time-table tr.rtm-marker-row {
+  background: #fef9e7;
+}
+
+.rtm-time-table tr.rtm-marker-row:hover {
+  background: #fcf3cf;
+}
+
+.rtm-time-table tr.rtm-selected {
+  background: var(--color-accent-fill) !important;
+}
+
+.rtm-marker-badge {
+  display: inline-block;
+  background: var(--color-accent);
+  color: #fff;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-weight: 600;
+  margin-right: 3px;
+}
+
 /* ===== 滚动条 ===== */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }

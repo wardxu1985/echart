@@ -45,9 +45,41 @@ pub struct ChartData {
     pub series: Vec<SeriesData>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GroupColumnInfo {
+    pub name: String,
+    pub element_count: usize,
+    pub sample_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RtmTimeEntry {
+    pub time_str: String,
+    pub timestamp: f64,
+    pub max_val: f64,
+    pub min_val: f64,
+    pub avg_val: f64,
+    pub element_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RtmSnapshot {
+    pub values: Vec<f64>,
+    pub max_val: f64,
+    pub min_val: f64,
+    pub avg_val: f64,
+    pub max_index: usize,
+    pub min_index: usize,
+    pub element_count: usize,
+}
+
 pub struct WindowState {
     pub raw_data: HashMap<String, Vec<f64>>,
     pub columns: Vec<ColumnInfo>,
+    /// Comma-separated group columns: column_name -> raw string values per row
+    pub raw_grouped_data: HashMap<String, Vec<String>>,
+    /// Original time strings (e.g., "2026-07-22 20:59:10")
+    pub time_raw_strings: Vec<String>,
 }
 
 pub struct AppState {

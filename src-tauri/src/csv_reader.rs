@@ -1,8 +1,8 @@
 use std::collections::HashMap;
-use crate::column_parser::{parse_columns, find_vin};
+use crate::column_parser::{parse_columns, find_vin, find_grouped_columns};
 use crate::state::ColumnInfo;
 
-pub fn read_csv(path: &str) -> Result<(HashMap<String, Vec<f64>>, Vec<ColumnInfo>, usize, Option<String>), String> {
+pub fn read_csv(path: &str) -> Result<(HashMap<String, Vec<f64>>, Vec<ColumnInfo>, usize, Option<String>, HashMap<String, Vec<String>>, Vec<String>), String> {
     // 读取原始字节
     let bytes = std::fs::read(path).map_err(|e| format!("无法读取文件: {}", e))?;
 
@@ -50,5 +50,19 @@ pub fn read_csv(path: &str) -> Result<(HashMap<String, Vec<f64>>, Vec<ColumnInfo
     let vin = find_vin(&header, &raw_cols);
     let (data, columns) = parse_columns(&header, &raw_cols);
 
-    Ok((data, columns, row_count, vin))
+    // 检测逗号分隔的组数据列
+    let grouped = find_grouped_columns(&header, &raw_cols);
+    let mut raw_grouped_data: HashMap<String, Vec<String>> = HashMap::new();
+    for (name, strings, _count) in &grouped {
+        raw_grouped_data.insert(name.clone(), strings.clone());
+    }
+
+    // 提取时间列的原始字符串
+    let time_raw_strings: Vec<String> = if !raw_cols.is_empty() {
+        raw_cols[0].clone()
+    } else {
+        Vec::new()
+    };
+
+    Ok((data, columns, row_count, vin, raw_grouped_data, time_raw_strings))
 }

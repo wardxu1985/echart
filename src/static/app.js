@@ -1048,6 +1048,10 @@ function onChartClicked(isoTime) {
   updateClearMarkersBtn();
   applyMarkers(window.__chartData, chartMarkers);
   showToast('已添加记号 M' + chartMarkers.length, 'success');
+  // 通知 RTM 模块更新记号列表
+  if (typeof RtmModule !== 'undefined' && RtmModule.refreshMarkers) {
+    RtmModule.refreshMarkers();
+  }
 }
 
 function clearMarkers() {
@@ -1059,6 +1063,10 @@ function clearMarkers() {
     applyMarkers(window.__chartData, chartMarkers);
   }
   showToast('记号已清空', 'info');
+  // 通知 RTM 模块更新记号列表
+  if (typeof RtmModule !== 'undefined' && RtmModule.refreshMarkers) {
+    RtmModule.refreshMarkers();
+  }
 }
 
 function updateClearMarkersBtn() {
@@ -1152,6 +1160,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('menuOpenFile').addEventListener('click', onOpenFile);
   document.getElementById('menuClearMarkers').addEventListener('click', clearMarkers);
   document.getElementById('menuMarkerList').addEventListener('click', showMarkerList);
+  // RTM 分析按钮事件由 rtm.js 中的 RtmModule.init() 处理
   document.getElementById('markerDialogCloseBtn').addEventListener('click', closeMarkerList);
   document.getElementById('markerDialogOverlay').addEventListener('click', function (e) {
     if (e.target === e.currentTarget) closeMarkerList();
