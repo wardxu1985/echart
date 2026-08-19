@@ -34,8 +34,8 @@ jobs:
           fi
           echo "BUILD_VERSION=$VERSION" >> $GITHUB_ENV
           # 更新三处版本号：Cargo.toml、tauri.conf.json、index.html
-          sed -i 's/^version = "0.3.0"/version = "'"$VERSION"'"/' src-tauri/Cargo.toml
-          sed -i 's/"version": "0.3.0"/"version": "'"$VERSION"'"/' src-tauri/tauri.conf.json
+          sed -i 's/^version = .*/version = "'"$VERSION"'"/' src-tauri/Cargo.toml
+          sed -i 's/"version": .*/"version": "'"$VERSION"'"/' src-tauri/tauri.conf.json
           # HTML 中的版本号由 Rust get_version 动态获取，保留初始值用于首次加载
           echo "Version set to: $VERSION"
 
