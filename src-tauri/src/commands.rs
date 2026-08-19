@@ -316,6 +316,7 @@ pub fn rtm_get_time_list(
             timestamp: ts,
             max_val,
             min_val,
+            range_val: max_val - min_val,
             avg_val,
             element_count: parts.len(),
         });

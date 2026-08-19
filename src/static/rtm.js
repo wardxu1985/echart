@@ -427,10 +427,11 @@ var RtmModule = (function () {
     var sorted = filtered.slice().sort(function (a, b) {
       var cmp = 0;
       switch (timeListSortKey) {
-        case 'time': cmp = a.timestamp - b.timestamp; break;
-        case 'max':  cmp = a.max_val - b.max_val; break;
-        case 'min':  cmp = a.min_val - b.min_val; break;
-        case 'avg':  cmp = a.avg_val - b.avg_val; break;
+        case 'time':  cmp = a.timestamp - b.timestamp; break;
+        case 'max':   cmp = a.max_val - b.max_val; break;
+        case 'min':   cmp = a.min_val - b.min_val; break;
+        case 'range': cmp = a.range_val - b.range_val; break;
+        case 'avg':   cmp = a.avg_val - b.avg_val; break;
       }
       return timeListSortAsc ? cmp : -cmp;
     });
@@ -457,6 +458,7 @@ var RtmModule = (function () {
         '<td>' + escapeHtml(entry.time_str) + '</td>' +
         '<td style="font-family:var(--font-mono);text-align:right;">' + entry.max_val.toFixed(4) + '</td>' +
         '<td style="font-family:var(--font-mono);text-align:right;">' + entry.min_val.toFixed(4) + '</td>' +
+        '<td style="font-family:var(--font-mono);text-align:right;">' + entry.range_val.toFixed(4) + '</td>' +
         '<td style="font-family:var(--font-mono);text-align:right;">' + entry.avg_val.toFixed(4) + '</td>' +
         '<td>' + markerLabel + '</td></tr>';
     });

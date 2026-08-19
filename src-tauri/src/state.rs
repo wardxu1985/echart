@@ -59,6 +59,7 @@ pub struct RtmTimeEntry {
     pub max_val: f64,
     pub min_val: f64,
     pub avg_val: f64,
+    pub range_val: f64,
     pub element_count: usize,
 }
 
