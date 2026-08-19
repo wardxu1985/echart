@@ -42,6 +42,19 @@
         </select>
       </div>
 
+      <div class="panel-section" id="dateRangeSection" style="display:none;">
+        <label class="section-title">日期区间</label>
+        <div class="date-range-row">
+          <input type="datetime-local" id="dateRangeStart" class="date-range-input">
+          <span class="date-range-sep">~</span>
+          <input type="datetime-local" id="dateRangeEnd" class="date-range-input">
+        </div>
+        <div class="date-range-actions">
+          <button id="dateRangeReset" class="date-range-btn" title="重置为全部数据">重置</button>
+          <span id="dateRangeInfo" class="date-range-info"></span>
+        </div>
+      </div>
+
       <div class="panel-section">
         <label class="section-title">信号</label>
         <button id="selectSignalBtn" disabled>选择信号...</button>

@@ -49,6 +49,9 @@ function defaultSession() {
     fileLoaded: false,
     timeRange: null,
     vin: null,
+    // 日期区间筛选
+    dateRangeStart: null,
+    dateRangeEnd: null,
     // 图表缓存
     chartData: null,
     chartMarkers: [],
@@ -361,6 +364,93 @@ function onXSelectChange() {
   updateStatusBar();
 }
 
+// ===== 日期区间选择器 =====
+function populateDateRange(timeRange) {
+  const section = document.getElementById('dateRangeSection');
+  const startInput = document.getElementById('dateRangeStart');
+  const endInput = document.getElementById('dateRangeEnd');
+  const info = document.getElementById('dateRangeInfo');
+
+  if (!timeRange || !timeRange.start || !timeRange.end) {
+    section.style.display = 'none';
+    return;
+  }
+
+  // 将 Unix 时间戳转为 datetime-local 格式
+  function tsToLocal(ts) {
+    const d = new Date(ts * 1000);
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  }
+
+  const startVal = tsToLocal(timeRange.start);
+  const endVal = tsToLocal(timeRange.end);
+
+  startInput.value = startVal;
+  endInput.value = endVal;
+  startInput.min = startVal;
+  startInput.max = endVal;
+  endInput.min = startVal;
+  endInput.max = endVal;
+
+  // 存储原始时间戳到 session
+  var sess = currentSession();
+  if (sess) {
+    sess.dateRangeStart = timeRange.start;
+    sess.dateRangeEnd = timeRange.end;
+  }
+
+  // 显示数据时间范围
+  const startDate = new Date(timeRange.start * 1000);
+  const endDate = new Date(timeRange.end * 1000);
+  const fmtDate = d => `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+  info.textContent = `数据范围: ${fmtDate(startDate)} ~ ${fmtDate(endDate)}`;
+
+  section.style.display = 'block';
+}
+
+function getDateRange() {
+  var sess = currentSession();
+  if (!sess || !sess.dateRangeStart) return { start: null, end: null };
+
+  const startInput = document.getElementById('dateRangeStart');
+  const endInput = document.getElementById('dateRangeEnd');
+
+  if (!startInput.value || !endInput.value) return { start: null, end: null };
+
+  const startTs = new Date(startInput.value).getTime() / 1000;
+  const endTs = new Date(endInput.value).getTime() / 1000;
+
+  // 如果用户没有修改，默认传 null（不筛选）
+  if (Math.abs(startTs - sess.dateRangeStart) < 1 &&
+      Math.abs(endTs - sess.dateRangeEnd) < 1) {
+    return { start: null, end: null };
+  }
+
+  return { start: startTs, end: endTs };
+}
+
+function onDateRangeChange() {
+  updateGenerateButton();
+}
+
+function resetDateRange() {
+  var sess = currentSession();
+  if (!sess || !sess.timeRange) return;
+
+  const startInput = document.getElementById('dateRangeStart');
+  const endInput = document.getElementById('dateRangeEnd');
+
+  startInput.value = new Date(sess.timeRange.start * 1000).toISOString().slice(0, 19);
+  endInput.value = new Date(sess.timeRange.end * 1000).toISOString().slice(0, 19);
+
+  // 重新设置为原始时间范围
+  sess.dateRangeStart = sess.timeRange.start;
+  sess.dateRangeEnd = sess.timeRange.end;
+
+  showToast('日期区间已重置', 'info');
+}
+
 // ===== Tab 栏 =====
 function renderTabBar() {
   var bar = document.getElementById('tabBar');
@@ -457,8 +547,14 @@ function updateUIForSession() {
     document.getElementById('chartPlaceholder').style.display = 'flex';
     document.getElementById('chartPlaceholder').innerHTML = '<p>📊 请打开 Excel 文件，选择信号后生成图表</p>';
     document.getElementById('chartContainer').style.display = 'none';
+    // 隐藏日期区间选择器
+    document.getElementById('dateRangeSection').style.display = 'none';
   }
   populateXSelect(sess.columns);
+  // 恢复日期区间选择器状态
+  if (sess.timeRange) {
+    populateDateRange(sess.timeRange);
+  }
   renderSignalTags();
   updateGenerateButton();
   updateStatusBar();
@@ -905,6 +1001,9 @@ async function loadFile(path, inheritFrom, inheritColumns) {
     currentSession().fileLoaded = true;
     currentSession().timeRange = result.time_range || null;
 
+    // 填充日期区间选择器
+    populateDateRange(result.time_range);
+
     // 显示 VIN/车架号
     var vinBanner = document.getElementById('vinBanner');
     if (result.vin) {
@@ -985,11 +1084,14 @@ async function generateChart() {
   showToast('正在生成图表...', 'info');
 
   try {
+    // 获取日期区间
+    const dateRange = getDateRange();
+
     var data = await TauriBridge.getSeries(
       currentSession().windowId,
       currentSession().selectedYCols,
-      null,
-      null
+      dateRange.start,
+      dateRange.end
     );
 
     // 缓存到当前 session
@@ -1168,6 +1270,11 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('selectSignalBtn').addEventListener('click', openSignalDialog);
   document.getElementById('generateBtn').addEventListener('click', generateChart);
   document.getElementById('xSelect').addEventListener('change', onXSelectChange);
+
+  // 日期区间事件
+  document.getElementById('dateRangeStart').addEventListener('change', onDateRangeChange);
+  document.getElementById('dateRangeEnd').addEventListener('change', onDateRangeChange);
+  document.getElementById('dateRangeReset').addEventListener('click', resetDateRange);
 
   // 对话框按钮事件
   document.getElementById('dialogCloseBtn').addEventListener('click', closeSignalDialog);
