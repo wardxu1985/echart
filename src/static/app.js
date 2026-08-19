@@ -376,7 +376,7 @@ function populateDateRange(timeRange) {
     return;
   }
 
-  // 将 Unix 时间戳转为 datetime-local 格式
+  // 将 Unix 时间戳转为 datetime-local 格式（本地时间）
   function tsToLocal(ts) {
     const d = new Date(ts * 1000);
     const pad = n => String(n).padStart(2, '0');
@@ -388,16 +388,12 @@ function populateDateRange(timeRange) {
 
   startInput.value = startVal;
   endInput.value = endVal;
-  startInput.min = startVal;
-  startInput.max = endVal;
-  endInput.min = startVal;
-  endInput.max = endVal;
 
-  // 存储原始时间戳到 session
+  // 存储原始字符串用于比较，避免时区转换精度差异
   var sess = currentSession();
   if (sess) {
-    sess.dateRangeStart = timeRange.start;
-    sess.dateRangeEnd = timeRange.end;
+    sess.dateRangeOrigStart = startVal;
+    sess.dateRangeOrigEnd = endVal;
   }
 
   // 显示数据时间范围
@@ -411,21 +407,22 @@ function populateDateRange(timeRange) {
 
 function getDateRange() {
   var sess = currentSession();
-  if (!sess || !sess.dateRangeStart) return { start: null, end: null };
+  if (!sess || !sess.dateRangeOrigStart) return { start: null, end: null };
 
   const startInput = document.getElementById('dateRangeStart');
   const endInput = document.getElementById('dateRangeEnd');
 
   if (!startInput.value || !endInput.value) return { start: null, end: null };
 
-  const startTs = new Date(startInput.value).getTime() / 1000;
-  const endTs = new Date(endInput.value).getTime() / 1000;
-
-  // 如果用户没有修改，默认传 null（不筛选）
-  if (Math.abs(startTs - sess.dateRangeStart) < 1 &&
-      Math.abs(endTs - sess.dateRangeEnd) < 1) {
+  // 直接比较字符串，避免时区转换精度问题
+  if (startInput.value === sess.dateRangeOrigStart &&
+      endInput.value === sess.dateRangeOrigEnd) {
     return { start: null, end: null };
   }
+
+  // 转换为 Unix 时间戳
+  const startTs = new Date(startInput.value).getTime() / 1000;
+  const endTs = new Date(endInput.value).getTime() / 1000;
 
   return { start: startTs, end: endTs };
 }
@@ -438,15 +435,8 @@ function resetDateRange() {
   var sess = currentSession();
   if (!sess || !sess.timeRange) return;
 
-  const startInput = document.getElementById('dateRangeStart');
-  const endInput = document.getElementById('dateRangeEnd');
-
-  startInput.value = new Date(sess.timeRange.start * 1000).toISOString().slice(0, 19);
-  endInput.value = new Date(sess.timeRange.end * 1000).toISOString().slice(0, 19);
-
-  // 重新设置为原始时间范围
-  sess.dateRangeStart = sess.timeRange.start;
-  sess.dateRangeEnd = sess.timeRange.end;
+  // 重新填充日期区间（恢复原始值）
+  populateDateRange(sess.timeRange);
 
   showToast('日期区间已重置', 'info');
 }

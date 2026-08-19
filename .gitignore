@@ -4,3 +4,6 @@ node_modules/
 test_*.csv
 *.xlsx
 *.csv
+node_modules/
+.pnpm-store/
+target/
