@@ -376,11 +376,11 @@ function populateDateRange(timeRange) {
     return;
   }
 
-  // 将 Unix 时间戳转为 datetime-local 格式（本地时间）
+  // 将 Unix 时间戳转为 "YYYY-MM-DD HH:MM:SS" 格式（本地时间）
   function tsToLocal(ts) {
     const d = new Date(ts * 1000);
     const pad = n => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
   }
 
   const startVal = tsToLocal(timeRange.start);
@@ -389,7 +389,7 @@ function populateDateRange(timeRange) {
   startInput.value = startVal;
   endInput.value = endVal;
 
-  // 存储原始字符串用于比较，避免时区转换精度差异
+  // 存储原始字符串用于比较
   var sess = currentSession();
   if (sess) {
     sess.dateRangeOrigStart = startVal;
@@ -397,12 +397,26 @@ function populateDateRange(timeRange) {
   }
 
   // 显示数据时间范围
+  const fmtDate = d => `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
   const startDate = new Date(timeRange.start * 1000);
   const endDate = new Date(timeRange.end * 1000);
-  const fmtDate = d => `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
   info.textContent = `数据范围: ${fmtDate(startDate)} ~ ${fmtDate(endDate)}`;
 
   section.style.display = 'block';
+}
+
+// 解析 "YYYY-MM-DD HH:MM:SS" 为 Unix 时间戳
+function parseDateTimeStr(s) {
+  // 支持 "YYYY-MM-DD HH:MM:SS" 和 "YYYY-MM-DD HH:MM"
+  const match = s.trim().match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})(?::(\d{2}))?$/);
+  if (!match) return null;
+  const [, y, mo, d, h, mi, sec] = match;
+  // 构造本地时间的 Date 对象
+  const dt = new Date(
+    parseInt(y), parseInt(mo) - 1, parseInt(d),
+    parseInt(h), parseInt(mi), parseInt(sec || '0')
+  );
+  return dt.getTime() / 1000;
 }
 
 function getDateRange() {
@@ -412,17 +426,21 @@ function getDateRange() {
   const startInput = document.getElementById('dateRangeStart');
   const endInput = document.getElementById('dateRangeEnd');
 
-  if (!startInput.value || !endInput.value) return { start: null, end: null };
+  if (!startInput.value.trim() || !endInput.value.trim()) return { start: null, end: null };
 
-  // 直接比较字符串，避免时区转换精度问题
-  if (startInput.value === sess.dateRangeOrigStart &&
-      endInput.value === sess.dateRangeOrigEnd) {
+  // 字符串比较：是否与原始值相同
+  if (startInput.value.trim() === sess.dateRangeOrigStart &&
+      endInput.value.trim() === sess.dateRangeOrigEnd) {
     return { start: null, end: null };
   }
 
-  // 转换为 Unix 时间戳
-  const startTs = new Date(startInput.value).getTime() / 1000;
-  const endTs = new Date(endInput.value).getTime() / 1000;
+  const startTs = parseDateTimeStr(startInput.value);
+  const endTs = parseDateTimeStr(endInput.value);
+
+  if (startTs === null || endTs === null) {
+    showToast('日期格式无效，请使用 YYYY-MM-DD HH:MM:SS', 'error');
+    return { start: null, end: null };
+  }
 
   return { start: startTs, end: endTs };
 }
