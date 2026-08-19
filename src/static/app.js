@@ -20,8 +20,8 @@ var TauriBridge = {
 
   async getSeries(windowId, columns, timeStart = null, timeEnd = null) {
     const args = { windowId, columns };
-    if (timeStart !== null) args.time_start = timeStart;
-    if (timeEnd !== null) args.time_end = timeEnd;
+    if (timeStart !== null) args.timeStart = timeStart;
+    if (timeEnd !== null) args.timeEnd = timeEnd;
     return invoke('get_series', args);
   },
 
