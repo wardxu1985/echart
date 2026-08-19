@@ -449,7 +449,7 @@ function onDateRangeConfirm() {
   const fmtDate = d => `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
   info.textContent = `已筛选: ${fmtDate(new Date(startTs * 1000))} ~ ${fmtDate(new Date(endTs * 1000))}`;
 
-  showToast('日期区间已确认，请点击"生成图表"', 'success');
+  showToast('日期区间已确认，点击"生成图表"查看结果', 'success');
 }
 
 function onDateRangeReset() {
