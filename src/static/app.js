@@ -52,6 +52,8 @@ function defaultSession() {
     // 日期区间筛选
     dateRangeStart: null,
     dateRangeEnd: null,
+    dateRangeOrigStart: null,
+    dateRangeOrigEnd: null,
     // 图表缓存
     chartData: null,
     chartMarkers: [],
@@ -389,11 +391,13 @@ function populateDateRange(timeRange) {
   startInput.value = startVal;
   endInput.value = endVal;
 
-  // 存储原始字符串用于比较
+  // 存储原始值 + 重置已确认的时间戳
   var sess = currentSession();
   if (sess) {
     sess.dateRangeOrigStart = startVal;
     sess.dateRangeOrigEnd = endVal;
+    sess.dateRangeStart = null;  // 未确认
+    sess.dateRangeEnd = null;
   }
 
   // 显示数据时间范围
@@ -407,11 +411,9 @@ function populateDateRange(timeRange) {
 
 // 解析 "YYYY-MM-DD HH:MM:SS" 为 Unix 时间戳
 function parseDateTimeStr(s) {
-  // 支持 "YYYY-MM-DD HH:MM:SS" 和 "YYYY-MM-DD HH:MM"
   const match = s.trim().match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})(?::(\d{2}))?$/);
   if (!match) return null;
   const [, y, mo, d, h, mi, sec] = match;
-  // 构造本地时间的 Date 对象
   const dt = new Date(
     parseInt(y), parseInt(mo) - 1, parseInt(d),
     parseInt(h), parseInt(mi), parseInt(sec || '0')
@@ -419,43 +421,42 @@ function parseDateTimeStr(s) {
   return dt.getTime() / 1000;
 }
 
-function getDateRange() {
+function onDateRangeConfirm() {
   var sess = currentSession();
-  if (!sess || !sess.dateRangeOrigStart) return { start: null, end: null };
+  if (!sess) return;
 
   const startInput = document.getElementById('dateRangeStart');
   const endInput = document.getElementById('dateRangeEnd');
-
-  if (!startInput.value.trim() || !endInput.value.trim()) return { start: null, end: null };
-
-  // 字符串比较：是否与原始值相同
-  if (startInput.value.trim() === sess.dateRangeOrigStart &&
-      endInput.value.trim() === sess.dateRangeOrigEnd) {
-    return { start: null, end: null };
-  }
+  const info = document.getElementById('dateRangeInfo');
 
   const startTs = parseDateTimeStr(startInput.value);
   const endTs = parseDateTimeStr(endInput.value);
 
   if (startTs === null || endTs === null) {
     showToast('日期格式无效，请使用 YYYY-MM-DD HH:MM:SS', 'error');
-    return { start: null, end: null };
+    return;
   }
 
-  return { start: startTs, end: endTs };
+  if (startTs >= endTs) {
+    showToast('开始时间必须早于结束时间', 'error');
+    return;
+  }
+
+  // 存储已确认的时间戳
+  sess.dateRangeStart = startTs;
+  sess.dateRangeEnd = endTs;
+
+  const fmtDate = d => `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+  info.textContent = `已筛选: ${fmtDate(new Date(startTs * 1000))} ~ ${fmtDate(new Date(endTs * 1000))}`;
+
+  showToast('日期区间已确认，请点击"生成图表"', 'success');
 }
 
-function onDateRangeChange() {
-  updateGenerateButton();
-}
-
-function resetDateRange() {
+function onDateRangeReset() {
   var sess = currentSession();
   if (!sess || !sess.timeRange) return;
 
-  // 重新填充日期区间（恢复原始值）
   populateDateRange(sess.timeRange);
-
   showToast('日期区间已重置', 'info');
 }
 
@@ -1092,14 +1093,16 @@ async function generateChart() {
   showToast('正在生成图表...', 'info');
 
   try {
-    // 获取日期区间
-    const dateRange = getDateRange();
+    // 获取已确认的日期区间
+    var sess = currentSession();
+    const startTs = sess.dateRangeStart || null;
+    const endTs = sess.dateRangeEnd || null;
 
     var data = await TauriBridge.getSeries(
-      currentSession().windowId,
-      currentSession().selectedYCols,
-      dateRange.start,
-      dateRange.end
+      sess.windowId,
+      sess.selectedYCols,
+      startTs,
+      endTs
     );
 
     // 缓存到当前 session
@@ -1280,9 +1283,8 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('xSelect').addEventListener('change', onXSelectChange);
 
   // 日期区间事件
-  document.getElementById('dateRangeStart').addEventListener('change', onDateRangeChange);
-  document.getElementById('dateRangeEnd').addEventListener('change', onDateRangeChange);
-  document.getElementById('dateRangeReset').addEventListener('click', resetDateRange);
+  document.getElementById('dateRangeConfirm').addEventListener('click', onDateRangeConfirm);
+  document.getElementById('dateRangeReset').addEventListener('click', onDateRangeReset);
 
   // 对话框按钮事件
   document.getElementById('dialogCloseBtn').addEventListener('click', closeSignalDialog);

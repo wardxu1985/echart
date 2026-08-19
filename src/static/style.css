@@ -213,6 +213,18 @@ html, body {
   background: #f5f8fe;
 }
 
+.date-range-btn-primary {
+  background: var(--color-accent);
+  color: #fff;
+  border-color: var(--color-accent);
+}
+
+.date-range-btn-primary:hover {
+  background: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
+  color: #fff;
+}
+
 .date-range-info {
   font-size: 11px;
   color: var(--color-text-tertiary);
