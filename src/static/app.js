@@ -54,6 +54,7 @@ function defaultSession() {
     dateRangeEnd: null,
     dateRangeOrigStart: null,
     dateRangeOrigEnd: null,
+    dateRangeConfirmed: false,
     // 图表缓存
     chartData: null,
     chartMarkers: [],
@@ -391,13 +392,16 @@ function populateDateRange(timeRange) {
   startInput.value = startVal;
   endInput.value = endVal;
 
-  // 存储原始值 + 重置已确认的时间戳
+  // 存储原始值
   var sess = currentSession();
   if (sess) {
     sess.dateRangeOrigStart = startVal;
     sess.dateRangeOrigEnd = endVal;
-    sess.dateRangeStart = null;  // 未确认
-    sess.dateRangeEnd = null;
+    // 首次加载或重置后，清除已确认状态
+    if (!sess.dateRangeConfirmed) {
+      sess.dateRangeStart = null;
+      sess.dateRangeEnd = null;
+    }
   }
 
   // 显示数据时间范围
@@ -445,6 +449,7 @@ function onDateRangeConfirm() {
   // 存储已确认的时间戳
   sess.dateRangeStart = startTs;
   sess.dateRangeEnd = endTs;
+  sess.dateRangeConfirmed = true;
 
   const fmtDate = d => `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
   info.textContent = `已筛选: ${fmtDate(new Date(startTs * 1000))} ~ ${fmtDate(new Date(endTs * 1000))}`;
@@ -456,6 +461,9 @@ function onDateRangeReset() {
   var sess = currentSession();
   if (!sess || !sess.timeRange) return;
 
+  sess.dateRangeConfirmed = false;
+  sess.dateRangeStart = null;
+  sess.dateRangeEnd = null;
   populateDateRange(sess.timeRange);
   showToast('日期区间已重置', 'info');
 }
@@ -1010,6 +1018,11 @@ async function loadFile(path, inheritFrom, inheritColumns) {
     currentSession().fileLoaded = true;
     currentSession().timeRange = result.time_range || null;
 
+    // 重置日期区间确认状态
+    currentSession().dateRangeConfirmed = false;
+    currentSession().dateRangeStart = null;
+    currentSession().dateRangeEnd = null;
+
     // 填充日期区间选择器
     populateDateRange(result.time_range);
 
@@ -1095,8 +1108,9 @@ async function generateChart() {
   try {
     // 获取已确认的日期区间
     var sess = currentSession();
-    const startTs = sess.dateRangeStart || null;
-    const endTs = sess.dateRangeEnd || null;
+    const useFilter = sess.dateRangeConfirmed && sess.dateRangeStart !== null;
+    const startTs = useFilter ? sess.dateRangeStart : null;
+    const endTs = useFilter ? sess.dateRangeEnd : null;
 
     var data = await TauriBridge.getSeries(
       sess.windowId,
