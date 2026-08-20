@@ -559,6 +559,17 @@ function startNewTab() {
 function updateUIForSession() {
   var sess = currentSession();
   if (!sess) return;
+
+  // 恢复文件名和车架号
+  document.getElementById('fileLabel').textContent = sess.fileName ? `📁 ${sess.fileName}` : '未加载文件';
+  var vinBanner = document.getElementById('vinBanner');
+  if (sess.vin) {
+    vinBanner.textContent = '🚗 ' + sess.vin;
+    vinBanner.style.display = 'block';
+  } else {
+    vinBanner.style.display = 'none';
+  }
+
   // 检查空状态
   if (!sess.fileLoaded) {
     document.getElementById('chartPlaceholder').style.display = 'flex';
@@ -1027,6 +1038,7 @@ async function loadFile(path, inheritFrom, inheritColumns) {
     populateDateRange(result.time_range);
 
     // 显示 VIN/车架号
+    currentSession().vin = result.vin || null;
     var vinBanner = document.getElementById('vinBanner');
     if (result.vin) {
       vinBanner.textContent = '🚗 ' + result.vin;
