@@ -4,6 +4,9 @@ A desktop signal viewer for automotive CAN data (CANape-style), built with Tauri
 
 ## Version History
 
+### v0.5.1 (2026-08-20)
+- **Fix: Tab switching restores file name and VIN** — When switching between tabs, the file name label and vehicle identification number (VIN) banner now correctly reflect the active session's data instead of always showing the last opened file.
+
 ### v0.5.0 (2026-08-19)
 - **Fix: Gap detection for multi-rate data** — Added an absolute minimum gap threshold (60s) to the gap detection algorithm. Previously, when a file contained mixed sampling rates (e.g., 1s dense + 10s sparse), the global median was skewed by the dense data, causing all sparse intervals to be falsely detected as gaps.
 - **Feature: Date range filter** — Users can now filter the chart by selecting a date range. The filter is applied server-side before rendering.
