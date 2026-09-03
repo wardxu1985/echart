@@ -4,6 +4,9 @@ A desktop signal viewer for automotive CAN data (CANape-style), built with Tauri
 
 ## Version History
 
+### v0.6.0 (2026-09-03)
+- **Fix: Sparse signals no longer skipped** — Column parse ratio now uses the count of *non-empty* cells as its denominator instead of the total row count. Signals that are only sampled within event windows (e.g. `VehSpdAvg`, `BrkPdlPos`, `SCUShiftrLvrPosnbkp` in non-event-collection exports, where ~48% of rows are blank) were previously misclassified as non-numeric and hidden from the signal list. Empty cells no longer penalize the parse ratio, so these sparse-but-fully-numeric columns are now recognized as Numeric signals. Applies to both Excel and CSV parsing.
+
 ### v0.5.1 (2026-08-20)
 - **Fix: Tab switching restores file name and VIN** — When switching between tabs, the file name label and vehicle identification number (VIN) banner now correctly reflect the active session's data instead of always showing the last opened file.
 
