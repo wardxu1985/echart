@@ -30,13 +30,13 @@ jobs:
           if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
             VERSION="${{ github.ref_name }}"
           else
-            VERSION="0.3.0-$(date +%Y%m%d)-${{ github.run_number }}"
+            BASE=$(awk -F'"' '/^version *=/{gsub(/ /,"",$2); print $2; exit}' src-tauri/Cargo.toml)
+            VERSION="${BASE:-0.1.0}-$(date +%Y%m%d)-${{ github.run_number }}"
           fi
           echo "BUILD_VERSION=$VERSION" >> $GITHUB_ENV
-          # 更新三处版本号：Cargo.toml、tauri.conf.json、index.html
-          sed -i 's/^version = "0.3.0"/version = "'"$VERSION"'"/' src-tauri/Cargo.toml
-          sed -i 's/"version": "0.3.0"/"version": "'"$VERSION"'"/' src-tauri/tauri.conf.json
-          # HTML 中的版本号由 Rust get_version 动态获取，保留初始值用于首次加载
+          # 统一更新版本号：Cargo.toml 与 tauri.conf.json（匹配任意已存在版本）
+          sed -i "s/^version = \"[^\"]*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
+          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" src-tauri/tauri.conf.json
           echo "Version set to: $VERSION"
 
       - name: Install npm dependencies
