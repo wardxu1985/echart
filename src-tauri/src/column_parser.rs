@@ -102,7 +102,9 @@ pub fn parse_columns(
                 .collect();
 
             let valid_count = ts_values.iter().filter(|v| v.is_finite()).count();
-            let has_data = !values.is_empty() && valid_count as f64 / values.len() as f64 >= 0.5;
+            // 空单元格不计入分母：稀疏采集的信号（仅在事件窗口内有值）不应被丢弃
+            let nonempty_count = values.iter().filter(|v| !v.trim().is_empty()).count();
+            let has_data = nonempty_count > 0 && valid_count as f64 / nonempty_count as f64 >= 0.5;
 
             if has_data {
                 let min = ts_values.iter().cloned()
@@ -130,7 +132,9 @@ pub fn parse_columns(
             .collect();
 
         let valid_count = numeric.iter().filter(|v| v.is_some()).count();
-        let valid_ratio = if values.is_empty() { 0.0 } else { valid_count as f64 / values.len() as f64 };
+        // 空单元格不计入分母：稀疏采集的信号（如仅在制动/事件期间采样的列）不应被丢弃
+        let nonempty_count = values.iter().filter(|v| !v.trim().is_empty()).count();
+        let valid_ratio = if nonempty_count == 0 { 0.0 } else { valid_count as f64 / nonempty_count as f64 };
 
         if valid_ratio < 0.5 {
             columns.push(ColumnInfo {
@@ -390,6 +394,73 @@ mod tests {
             parts.len(),
             parts.iter().cloned().fold(f64::INFINITY, f64::min),
             parts.iter().cloned().fold(f64::NEG_INFINITY, f64::max));
+    }
+
+    #[test]
+    fn test_sparse_numeric_column_not_skipped() {
+        // 稀疏采集信号：70% 行为空，非空行全部可解析为数值（如 BrkPdlPos 场景）
+        let header = vec!["event_time".into(), "BrkPdlPos".into()];
+        let raw = vec![
+            vec!["2026-08-30 00:00:08".into(), "2026-08-30 00:00:09".into(), "2026-08-30 00:00:10".into()],
+            vec!["0".into(), "".into(), "11.76471".into()],
+        ];
+        let (data, cols) = parse_columns(&header, &raw);
+        assert_eq!(cols[1].col_type, ColumnType::Numeric, "稀疏数值列不应被跳过");
+        assert!(data.contains_key("BrkPdlPos"));
+    }
+
+    #[test]
+    fn test_sparse_non_numeric_still_skipped() {
+        // 非空行中一半以上解析不了的列仍应跳过
+        let header = vec!["event_time".into(), "notes".into()];
+        let raw = vec![
+            vec!["2026-08-30 00:00:08".into(), "2026-08-30 00:00:09".into(), "2026-08-30 00:00:10".into()],
+            vec!["hello".into(), "".into(), "world".into()],
+        ];
+        let (_data, cols) = parse_columns(&header, &raw);
+        assert_eq!(cols[1].col_type, ColumnType::Skip);
+    }
+
+    #[test]
+    fn test_sparse_time_column_not_skipped() {
+        // 稀疏时间列：非空单元格可解析为时间 → Time
+        let header = vec!["event_time".into(), "speed".into()];
+        let raw = vec![
+            vec!["2026-08-30 00:00:08".into(), "".into(), "2026-08-30 00:00:10".into()],
+            vec!["10".into(), "20".into(), "30".into()],
+        ];
+        let (_data, cols) = parse_columns(&header, &raw);
+        assert_eq!(cols[0].col_type, ColumnType::Time);
+    }
+
+    #[test]
+    fn test_export_file_sparse_signals_not_skipped() {
+        // 端到端验证：真实导出文件中的稀疏信号列不再被跳过
+        use calamine::{open_workbook, Reader, Xlsx};
+
+        let path = std::path::Path::new("/Users/ward/Desktop/claude/export_canlin_time_align_427csuv_20260903103439_非事件采集.xlsx");
+        if !path.exists() {
+            eprintln!("export file not found, skipping real file test");
+            return;
+        }
+        let mut workbook: Xlsx<_> = open_workbook(path).expect("open");
+        let sheet_name = workbook.sheet_names().first().unwrap().clone();
+        let range = workbook.worksheet_range(&sheet_name).expect("range");
+        let mut rows_iter = range.rows();
+        let header: Vec<String> = rows_iter.next().unwrap().iter().map(|c| c.to_string()).collect();
+        let col_count = header.len();
+        let mut raw_cols: Vec<Vec<String>> = vec![Vec::new(); col_count];
+        for row in rows_iter {
+            for (i, cell) in row.iter().enumerate() {
+                if i < col_count { raw_cols[i].push(cell.to_string()); }
+            }
+        }
+        let (_data, cols) = parse_columns(&header, &raw_cols);
+        for name in ["BrkPdlPos", "VehSpdAvg", "SCUShiftrLvrPosnbkp"] {
+            let col = cols.iter().find(|c| c.name == name).unwrap_or_else(|| panic!("{} 列缺失", name));
+            assert_eq!(col.col_type, ColumnType::Numeric, "{} 应为 Numeric", name);
+            println!("  {} -> {:?} ({} samples)", name, col.col_type, col.sample_count);
+        }
     }
 
     #[test]
